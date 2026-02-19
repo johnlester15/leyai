@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
-export const maxDuration = 30;
+export const maxDuration = 30; // Vercel Free allows up to 30s for functions
 
 export async function POST(req: NextRequest) {
   try {
@@ -32,8 +32,14 @@ export async function POST(req: NextRequest) {
     } else if (ext === "pdf") {
       try {
         const pdf = require("pdf-parse");
+        
         const pdfData = await pdf(buffer);
-        text = pdfData.text;
+        text = (pdfData.text || "")
+          .split('\n')
+          .filter((line: string) => line.trim().length > 0)
+          .join('\n')
+          .substring(0, 5000);
+          
       } catch (err: any) {
         console.error("PDF error:", err?.message);
         return NextResponse.json({ error: "Failed to read PDF: " + err?.message }, { status: 500 });
@@ -55,7 +61,6 @@ export async function POST(req: NextRequest) {
         }
 
         const zip = await JSZip.loadAsync(buffer);
-        const slideTexts: string[] = [];
 
         const slideFiles = Object.keys(zip.files)
           .filter(name => name.match(/ppt\/slides\/slide\d+\.xml$/))
@@ -65,26 +70,42 @@ export async function POST(req: NextRequest) {
             return numA - numB;
           });
 
-        console.log(`Found ${slideFiles.length} slides in PPTX`);
+        // Limit to first 80 slides for large presentations
+        const limitedSlides = slideFiles.slice(0, 80);
+        console.log(`Processing ${limitedSlides.length} of ${slideFiles.length} slides`);
 
-        for (const slideName of slideFiles) {
+        // Process slides in parallel with timeout protection
+        const slidePromises = limitedSlides.map(async (slideName) => {
           try {
             const slideXml = await zip.files[slideName].async("string");
             const textMatches = slideXml.match(/<a:t[^>]*>([^<]+)<\/a:t>/g) || [];
-            const slideText = textMatches
+            let slideText = textMatches
               .map((t: string) => t.replace(/<[^>]+>/g, ""))
               .filter((t: string) => t.trim())
               .join(" ");
+            
+            // Limit text per slide to speed up processing
+            if (slideText.length > 500) {
+              slideText = slideText.substring(0, 500) + "...";
+            }
+            
             if (slideText.trim()) {
               const slideNum = slideName.match(/slide(\d+)/)?.[1];
-              slideTexts.push(`[Slide ${slideNum}] ${slideText}`);
+              return `[Slide ${slideNum}] ${slideText}`;
             }
+            return null;
           } catch (slideErr: any) {
             console.error(`Error reading slide ${slideName}:`, slideErr?.message);
+            return null;
           }
-        }
+        });
 
-        text = slideTexts.join("\n");
+        const slideResults = await Promise.allSettled(slidePromises);
+        const processedSlides = slideResults
+          .filter(result => result.status === "fulfilled" && result.value !== null)
+          .map(result => (result as PromiseFulfilledResult<string>).value);
+
+        text = processedSlides.join("\n");
         
         if (!text || text.trim().length === 0) {
           return NextResponse.json({ error: "No text found in PPTX file. Make sure it has text content." }, { status: 400 });
