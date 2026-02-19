@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
 
     } else if (ext === "pdf") {
       try {
-        const pdfParse = (await import("pdf-parse")).default;
+        const pdfParse = await import("pdf-parse");
         const pdfData = await pdfParse(buffer);
         text = pdfData.text;
       } catch {
