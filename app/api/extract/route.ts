@@ -32,10 +32,16 @@ export async function POST(req: NextRequest) {
       try {
         const pdfModule = await import("pdf-parse");
         const pdfParse = (pdfModule as any).default || pdfModule;
+        
+        if (typeof pdfParse !== 'function') {
+          throw new Error("pdf-parse is not a function");
+        }
+        
         const pdfData = await pdfParse(buffer);
-        text = pdfData.text;
-      } catch {
-        return NextResponse.json({ error: "Install pdf-parse: npm install pdf-parse" }, { status: 500 });
+        text = pdfData?.text || "";
+      } catch (err: any) {
+        console.error("PDF error:", err?.message);
+        return NextResponse.json({ error: "Failed to read PDF. " + err?.message }, { status: 500 });
       }
 
     } else if (ext === "pptx" || ext === "ppt") {
@@ -53,22 +59,31 @@ export async function POST(req: NextRequest) {
           });
 
         for (const slideName of slideFiles) {
-          const slideXml = await zip.files[slideName].async("string");
-          // Extract text from XML tags
-          const textMatches = slideXml.match(/<a:t[^>]*>([^<]+)<\/a:t>/g) || [];
-          const slideText = textMatches
-            .map(t => t.replace(/<[^>]+>/g, ""))
-            .filter(t => t.trim())
-            .join(" ");
-          if (slideText.trim()) {
-            const slideNum = slideName.match(/slide(\d+)/)?.[1];
-            slideTexts.push(`[Slide ${slideNum}] ${slideText}`);
+          try {
+            const slideXml = await zip.files[slideName].async("string");
+            // Extract text from XML tags
+            const textMatches = slideXml.match(/<a:t[^>]*>([^<]+)<\/a:t>/g) || [];
+            const slideText = textMatches
+              .map(t => t.replace(/<[^>]+>/g, ""))
+              .filter(t => t.trim())
+              .join(" ");
+            if (slideText.trim()) {
+              const slideNum = slideName.match(/slide(\d+)/)?.[1];
+              slideTexts.push(`[Slide ${slideNum}] ${slideText}`);
+            }
+          } catch (slideErr: any) {
+            console.error(`Error reading slide ${slideName}:`, slideErr?.message);
           }
         }
 
         text = slideTexts.join("\n");
+        
+        if (!text || text.trim().length === 0) {
+          return NextResponse.json({ error: "No text found in PPTX file." }, { status: 400 });
+        }
       } catch (err: any) {
-        return NextResponse.json({ error: "Failed to read PPTX: " + err.message }, { status: 500 });
+        console.error("PPTX error:", err?.message);
+        return NextResponse.json({ error: "Failed to read PPTX: " + err?.message }, { status: 500 });
       }
 
     } else {

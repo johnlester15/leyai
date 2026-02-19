@@ -75,7 +75,16 @@ export default function StudyGenAI() {
       const formData = new FormData();
       formData.append("file", uploadedFile);
       const res = await fetch("/api/extract", { method: "POST", body: formData });
-      const data = await res.json();
+      
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ error: `Server error: ${res.status}` }));
+        throw new Error(errorData.error || `Server error: ${res.status}`);
+      }
+      
+      const data = await res.json().catch(() => {
+        throw new Error("Invalid response from server");
+      });
+      
       if (data.error) throw new Error(data.error);
       setExtractedText(data.text);
     } catch (err: any) {
@@ -168,7 +177,7 @@ export default function StudyGenAI() {
           <p className="text-xs text-[#555] hidden md:block">Upload → Learn → Quiz</p>
         </div>
       </nav>
-      
+
 
       <main className="max-w-7xl mx-auto px-6 py-10">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
