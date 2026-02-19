@@ -78,8 +78,8 @@ export async function POST(req: NextRequest) {
             const slideXml = await zip.files[slideName].async("string");
             const textMatches = slideXml.match(/<a:t[^>]*>([^<]+)<\/a:t>/g) || [];
             const slideText = textMatches
-              .map(t => t.replace(/<[^>]+>/g, ""))
-              .filter(t => t.trim())
+              .map((t: string) => t.replace(/<[^>]+>/g, ""))
+              .filter((t: string) => t.trim())
               .join(" ");
             if (slideText.trim()) {
               const slideNum = slideName.match(/slide(\d+)/)?.[1];
