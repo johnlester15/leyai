@@ -31,15 +31,11 @@ export async function POST(req: NextRequest) {
 
     } else if (ext === "pdf") {
       try {
-        const pdfModule = await import("pdf-parse");
-        const pdfParse = (pdfModule as any).default || pdfModule;
+        const pdfParse = await import("pdf-parse");
+        const pdf = pdfParse.default;
         
-        if (typeof pdfParse !== 'function') {
-          throw new Error("pdf-parse is not callable");
-        }
-        
-        const pdfData = await pdfParse(buffer);
-        text = pdfData?.text || "";
+        const pdfData = await pdf(buffer);
+        text = pdfData.text;
       } catch (err: any) {
         console.error("PDF error:", err?.message);
         return NextResponse.json({ error: "Failed to read PDF: " + err?.message }, { status: 500 });
