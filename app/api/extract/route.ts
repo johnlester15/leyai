@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
 export const maxDuration = 30; // Vercel Free allows up to 30s for functions
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL || "",
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
+);
 
 export async function POST(req: NextRequest) {
   try {
@@ -14,6 +20,20 @@ export async function POST(req: NextRequest) {
 
     const buffer = Buffer.from(await file.arrayBuffer());
     const ext = file.name.split(".").pop()?.toLowerCase();
+    const timestamp = Date.now();
+    const fileName = `${timestamp}-${file.name}`;
+
+    // Upload to Supabase Storage
+    try {
+      await supabase.storage
+        .from("LeyaAI")
+        .upload(fileName, buffer, { contentType: file.type });
+      console.log(`File uploaded to Supabase: ${fileName}`);
+    } catch (uploadErr: any) {
+      console.error("Supabase upload error:", uploadErr?.message);
+      return NextResponse.json({ error: "Failed to upload file to storage" }, { status: 500 });
+    }
+
     let text = "";
 
     if (ext === "txt") {
@@ -126,7 +146,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ 
       text: text.trim().slice(0, 6000),
       chars: text.length,
-      ext 
+      ext,
+      storagePath: fileName 
     });
 
   } catch (error: any) {
