@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { saveQuizData, loadQuizData, QuizData } from "@/lib/quiz-store";
 import { Settings, ChatMessage } from "@/app/lib/types";
+import { uploadFileInChunks } from "@/lib/chunk-upload";
 import Navbar from "@/app/components/Navbar";
 import HeroSection from "@/app/components/HeroSection";
 import InputSection from "@/app/components/InputSection";
@@ -60,6 +61,7 @@ export default function StudyGenAI() {
 
     const ext = uploadedFile.name.split(".").pop()?.toLowerCase();
 
+    // For text files, read directly
     if (ext === "txt") {
       const text = await uploadedFile.text();
       setExtractedText(text);
@@ -68,9 +70,34 @@ export default function StudyGenAI() {
 
     setIsExtracting(true);
     try {
-      const formData = new FormData();
-      formData.append("file", uploadedFile);
-      const res = await fetch("/api/extract", { method: "POST", body: formData });
+      let storagePath: string | null = null;
+
+      // Use chunked upload for files larger than 3MB
+      if (uploadedFile.size > 3 * 1024 * 1024) {
+        storagePath = await uploadFileInChunks(uploadedFile);
+      }
+
+      // Send to extract API
+      const payload = storagePath 
+        ? { storagePath }
+        : await (async () => {
+            const formData = new FormData();
+            formData.append("file", uploadedFile);
+            return formData;
+          })();
+
+      const res = await fetch("/api/extract", { 
+        method: "POST",
+        ...(storagePath 
+          ? { 
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload)
+            }
+          : {
+              body: payload
+            }
+        )
+      });
       
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({ error: `Server error: ${res.status}` }));

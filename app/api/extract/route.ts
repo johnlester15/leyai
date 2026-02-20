@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
-export const maxDuration = 30; // Vercel Free allows up to 30s for functions
+export const maxDuration = 30;
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || "",
@@ -11,29 +11,39 @@ const supabase = createClient(
 
 export async function POST(req: NextRequest) {
   try {
-    const formData = await req.formData();
-    const file = formData.get("file") as File;
+    const body = await req.json();
+    const { storagePath, fileName } = body;
 
-    if (!file) {
-      return NextResponse.json({ error: "No file provided." }, { status: 400 });
+    if (!storagePath && !fileName) {
+      return NextResponse.json({ error: "No file path or name provided." }, { status: 400 });
     }
 
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const ext = file.name.split(".").pop()?.toLowerCase();
-    const timestamp = Date.now();
-    const fileName = `${timestamp}-${file.name}`;
+    let buffer: Buffer;
 
-    // Upload to Supabase Storage
-    try {
-      await supabase.storage
+    // If using chunked upload from Supabase
+    if (storagePath) {
+      const { data, error } = await supabase.storage
         .from("LeyaAI")
-        .upload(fileName, buffer, { contentType: file.type });
-      console.log(`File uploaded to Supabase: ${fileName}`);
-    } catch (uploadErr: any) {
-      console.error("Supabase upload error:", uploadErr?.message);
-      return NextResponse.json({ error: "Failed to upload file to storage" }, { status: 500 });
+        .download(storagePath);
+
+      if (error || !data) {
+        return NextResponse.json({ error: "Failed to download file from storage" }, { status: 500 });
+      }
+
+      buffer = Buffer.from(await data.arrayBuffer());
+    } else {
+      // Direct FormData upload (for backward compatibility with small files)
+      const formData = await req.formData();
+      const file = formData.get("file") as File;
+
+      if (!file) {
+        return NextResponse.json({ error: "No file provided." }, { status: 400 });
+      }
+
+      buffer = Buffer.from(await file.arrayBuffer());
     }
 
+    const ext = (storagePath || fileName).split(".").pop()?.toLowerCase();
     let text = "";
 
     if (ext === "txt") {
@@ -52,14 +62,12 @@ export async function POST(req: NextRequest) {
     } else if (ext === "pdf") {
       try {
         const pdf = require("pdf-parse");
-        
         const pdfData = await pdf(buffer);
         text = (pdfData.text || "")
           .split('\n')
           .filter((line: string) => line.trim().length > 0)
           .join('\n')
           .substring(0, 5000);
-          
       } catch (err: any) {
         console.error("PDF error:", err?.message);
         return NextResponse.json({ error: "Failed to read PDF: " + err?.message }, { status: 500 });
@@ -81,7 +89,6 @@ export async function POST(req: NextRequest) {
         }
 
         const zip = await JSZip.loadAsync(buffer);
-
         const slideFiles = Object.keys(zip.files)
           .filter(name => name.match(/ppt\/slides\/slide\d+\.xml$/))
           .sort((a, b) => {
@@ -90,11 +97,7 @@ export async function POST(req: NextRequest) {
             return numA - numB;
           });
 
-        // Limit to first 80 slides for large presentations
         const limitedSlides = slideFiles.slice(0, 80);
-        console.log(`Processing ${limitedSlides.length} of ${slideFiles.length} slides`);
-
-        // Process slides in parallel with timeout protection
         const slidePromises = limitedSlides.map(async (slideName) => {
           try {
             const slideXml = await zip.files[slideName].async("string");
@@ -104,7 +107,6 @@ export async function POST(req: NextRequest) {
               .filter((t: string) => t.trim())
               .join(" ");
             
-            // Limit text per slide to speed up processing
             if (slideText.length > 500) {
               slideText = slideText.substring(0, 500) + "...";
             }
@@ -147,7 +149,7 @@ export async function POST(req: NextRequest) {
       text: text.trim().slice(0, 6000),
       chars: text.length,
       ext,
-      storagePath: fileName 
+      storagePath
     });
 
   } catch (error: any) {
