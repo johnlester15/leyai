@@ -18,7 +18,7 @@ export async function uploadFileInChunks(file: File, onProgress?: (progress: num
 
     const response = await fetch("/api/upload-chunk", {
       method: "POST",
-      body: formData,
+      body: formData,//sd
     });
 
     if (!response.ok) {
