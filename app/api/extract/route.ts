@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
       if (!file) {
         return NextResponse.json({ error: "No file provided." }, { status: 400 });
       }
-
+//test//
       fileName = formFileName || file.name || "";
       buffer = Buffer.from(await file.arrayBuffer());
       ext = fileName.split(".").pop()?.toLowerCase() || "";
