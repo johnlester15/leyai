@@ -5,10 +5,10 @@ export const maxDuration = 60;
 
 const MODELS = [
   "arcee-ai/trinity-large-preview:free",   // 1st: primary free model
-  "mistralai/mistral-7b-instruct:free",     // 2nd: free fallback
+  "openai/gpt-3.5-turbo",                   // 2nd: best backup (paid, always works)
   "google/gemma-2-9b-it:free",              // 3rd: free fallback
   "meta-llama/llama-3.1-8b-instruct:free",  // 4th: free fallback
-  "openai/gpt-3.5-turbo",                   // 5th: last resort (paid)
+  "mistralai/mistral-7b-instruct:free",     // 5th: free fallback
 ];
 
 async function callLLM(
@@ -193,7 +193,7 @@ export async function POST(req: NextRequest) {
 
     let studyKit: Record<string, unknown>;
     try {
-      const raw = await tryModelsSequentially(studyKitPrompt, API_KEY, 8000, 50000);
+      const raw = await tryModelsSequentially(studyKitPrompt, API_KEY, 8000, 20000);
       studyKit = repairAndParseJSON(raw);
       if (!studyKit.questions || !Array.isArray(studyKit.questions)) {
         throw new Error("Missing questions");
@@ -216,7 +216,7 @@ export async function POST(req: NextRequest) {
       const extraPrompt = buildQuestionsOnlyPrompt(content, settings, remaining, existingSummary);
 
       try {
-        const raw = await tryModelsSequentially(extraPrompt, API_KEY, Math.min(remaining * 250, 8000), 50000);
+        const raw = await tryModelsSequentially(extraPrompt, API_KEY, Math.min(remaining * 250, 8000), 20000);
         const extraQuestions = parseJSONArray(raw);
         if (Array.isArray(extraQuestions) && extraQuestions.length > 0) {
           allQuestions = allQuestions.concat(extraQuestions);
