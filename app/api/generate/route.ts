@@ -51,160 +51,179 @@ async function callLLM(
   }
 }
 
-function extractJSON(raw: string): Record<string, unknown> {
+// Race models in parallel — first success wins
+async function raceModels(prompt: string, apiKey: string, maxTokens: number, timeoutMs: number): Promise<string> {
+  return Promise.any(
+    MODELS.map((model) => callLLM(model, prompt, apiKey, maxTokens, timeoutMs))
+  );
+}
+
+function repairAndParseJSON(raw: string): Record<string, unknown> {
   let cleaned = raw.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
 
-  // Try direct parse first
   const match = cleaned.match(/\{[\s\S]*\}/);
   if (match) {
-    try {
-      return JSON.parse(match[0]);
-    } catch {
-      // JSON may be truncated — try to repair it
-    }
+    try { return JSON.parse(match[0]); } catch { /* truncated, try repair */ }
   }
 
-  // Repair truncated JSON: find the outermost { and try to close it
   const start = cleaned.indexOf("{");
   if (start === -1) throw new Error("No JSON found");
   let jsonStr = cleaned.substring(start);
 
-  // Remove any trailing incomplete item (cut mid-string, mid-object, etc.)
-  // Find the last complete question object by finding last "}" before truncation
-  const lastCompleteObj = jsonStr.lastIndexOf("}");
-  if (lastCompleteObj === -1) throw new Error("No JSON found");
+  const lastObj = jsonStr.lastIndexOf("}");
+  if (lastObj === -1) throw new Error("No JSON found");
+  jsonStr = jsonStr.substring(0, lastObj + 1);
 
-  jsonStr = jsonStr.substring(0, lastCompleteObj + 1);
-
-  // Close any unclosed arrays and objects
   const openBraces = (jsonStr.match(/\{/g) || []).length;
   const closeBraces = (jsonStr.match(/\}/g) || []).length;
   const openBrackets = (jsonStr.match(/\[/g) || []).length;
   const closeBrackets = (jsonStr.match(/\]/g) || []).length;
-
-  // Add missing closing brackets and braces
   jsonStr += "]".repeat(Math.max(0, openBrackets - closeBrackets));
   jsonStr += "}".repeat(Math.max(0, openBraces - closeBraces));
 
-  try {
-    return JSON.parse(jsonStr);
-  } catch {
+  try { return JSON.parse(jsonStr); } catch {
     throw new Error("Could not parse AI response. Please try again.");
   }
+}
+
+function parseJSONArray(raw: string): any[] {
+  let cleaned = raw.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+
+  const match = cleaned.match(/\[[\s\S]*\]/);
+  if (match) {
+    try { return JSON.parse(match[0]); } catch { /* truncated */ }
+  }
+
+  const start = cleaned.indexOf("[");
+  if (start === -1) throw new Error("No array found");
+  let arrStr = cleaned.substring(start);
+
+  // Find last complete object
+  const lastObj = arrStr.lastIndexOf("}");
+  if (lastObj === -1) throw new Error("No array found");
+  arrStr = arrStr.substring(0, lastObj + 1);
+
+  const openBrackets = (arrStr.match(/\[/g) || []).length;
+  const closeBrackets = (arrStr.match(/\]/g) || []).length;
+  arrStr += "]".repeat(Math.max(0, openBrackets - closeBrackets));
+
+  const openBraces = (arrStr.match(/\{/g) || []).length;
+  const closeBraces = (arrStr.match(/\}/g) || []).length;
+  arrStr += "}".repeat(Math.max(0, openBraces - closeBraces));
+
+  try { return JSON.parse(arrStr); } catch {
+    throw new Error("Could not parse questions response.");
+  }
+}
+
+function buildStudyKitPrompt(content: string, settings: any, questionCount: number): string {
+  return `You are an expert study assistant. Analyze this material and generate a study kit as JSON.
+
+MATERIAL:
+${content}
+
+Return this JSON structure:
+{
+  "summary": "400-600 word comprehensive explanation covering ALL topics. Plain paragraphs, no bullets. Explain why things matter. A student should learn from reading this alone.",
+  "objectives": ["5-8 learning objectives"],
+  "key_concepts": ["8-15 key terms"],
+  "glossary": [{"term":"Name","definition":"Clear 1-3 sentence definition"}],
+  "case_studies": [{"title":"Title","scenario":"4-6 sentence real scenario","lesson":"Connection to concepts"}],
+  "questions": [
+    {"type":"MCQ","question":"?","options":["A","B","C","D"],"answer":"correct option","explanation":"why"},
+    {"type":"Identification","question":"?","answer":"1-5 words","explanation":"why"}
+  ]
+}
+
+RULES:
+- Summary: 400-600 words, cover all topics, plain English
+- Glossary: 8-15 terms
+- Case Studies: 3-4 scenarios
+- EXACTLY ${questionCount} questions
+- Type: ${settings.type === "Mixed" ? "half MCQ, half Identification" : settings.type === "MCQ" ? "all MCQ" : "all Identification"}
+- MCQ: 4 options each. Difficulty: ${settings.difficulty}
+- All questions must be different, covering different concepts
+- ONLY valid JSON, no markdown`;
+}
+
+function buildQuestionsOnlyPrompt(content: string, settings: any, count: number, existing: string): string {
+  return `Generate EXACTLY ${count} quiz questions from this material as a JSON array. Do NOT repeat existing questions.
+
+MATERIAL:
+${content}
+
+EXISTING (do not repeat):
+${existing}
+
+Return ONLY a JSON array:
+[{"type":"${settings.type === "Identification" ? "Identification" : "MCQ"}","question":"?","options":["A","B","C","D"],"answer":"correct","explanation":"why"}]
+
+RULES:
+- EXACTLY ${count} questions, count carefully
+- Type: ${settings.type === "Mixed" ? "mix MCQ and Identification" : settings.type}
+- MCQ: 4 options. Identification: no options field, answer is 1-5 words
+- Difficulty: ${settings.difficulty}
+- Cover DIFFERENT topics than existing questions
+- ONLY valid JSON array, nothing else`;
 }
 
 export async function POST(req: NextRequest) {
   try {
     const { content, settings } = await req.json();
-    const questionCount = parseInt(settings.count || "10");
+    // Cap at 30 max
+    const requestedCount = Math.min(parseInt(settings.count || "10"), 30);
 
     const API_KEY = process.env.OPENROUTER_API_KEY || "";
     if (!API_KEY) {
       return NextResponse.json({ error: "API key not configured" }, { status: 500 });
     }
 
-    const prompt = `You are an expert study assistant and educator. Analyze the following study material and generate a comprehensive study kit in JSON format.
+    // Step 1: Generate study kit + first set of questions
+    // For 15 or fewer, ask for all. For more, ask for 15 to keep output small and reliable.
+    const firstCount = Math.min(requestedCount, 15);
+    const studyKitPrompt = buildStudyKitPrompt(content, settings, firstCount);
 
-STUDY MATERIAL:
-${content}
-
-SETTINGS:
-- Quiz Type: ${settings.type}
-- Difficulty: ${settings.difficulty}
-- Number of Questions: ${questionCount}
-
-Generate a JSON object with EXACTLY this structure:
-
-{
-  "summary": "A comprehensive, student-friendly explanation of ALL the key topics in the material. This should be like a mini-lecture that helps students UNDERSTAND the material deeply. Write 400–600 words MINIMUM. Cover every major topic. Explain concepts clearly using simple language. Use short paragraphs (3-4 sentences each). Explain WHY things matter, give examples, and connect ideas together. A student reading ONLY this summary should be able to understand the core material well enough to answer questions about it.",
-
-  "objectives": [
-    "After studying this material, students will be able to...",
-    "Include 5–8 specific, measurable learning objectives that cover all key topics"
-  ],
-
-  "key_concepts": [
-    "List 8–15 key concepts/terms from the material"
-  ],
-
-  "glossary": [
-    {
-      "term": "Term Name",
-      "definition": "A clear definition in 1–3 sentences. Include an example or analogy when helpful."
-    }
-  ],
-
-  "case_studies": [
-    {
-      "title": "Short descriptive title",
-      "scenario": "A realistic real-world scenario (4–6 sentences) that applies concepts from the material. Make it engaging and relatable.",
-      "lesson": "What this teaches — connect it to 2–3 key concepts."
-    }
-  ],
-
-  "questions": [
-    {
-      "type": "MCQ",
-      "question": "Clear question text?",
-      "options": ["Option A", "Option B", "Option C", "Option D"],
-      "answer": "The correct option exactly as written",
-      "explanation": "2–3 sentence explanation of why this is correct."
-    },
-    {
-      "type": "Identification",
-      "question": "What is ___?",
-      "answer": "Short answer (1–5 words)",
-      "explanation": "2–3 sentence explanation."
-    }
-  ]
-}
-
-CRITICAL RULES:
-- Summary: MUST be 400–600 words minimum. Cover ALL major topics. Plain English paragraphs, NO bullet points. Make it educational — students should learn from reading it.
-- Glossary: 8–15 terms with clear, student-friendly definitions.
-- Case Studies: 3–4 realistic scenarios.
-- Objectives: 5–8 clear learning objectives.
-- Key Concepts: 8–15 concepts.
-
-QUESTION RULES (VERY IMPORTANT):
-- You MUST generate EXACTLY ${questionCount} questions. Not fewer, not more. COUNT THEM.
-- I repeat: the "questions" array MUST contain exactly ${questionCount} items.
-- Type: ${settings.type === "Mixed" ? "roughly half MCQ and half Identification" : settings.type === "MCQ" ? "ALL questions must be MCQ" : "ALL questions must be Identification"}.
-- Every MCQ must have exactly 4 options with one correct answer.
-- Difficulty "${settings.difficulty}": ${settings.difficulty === "Easy" ? "basic recall, definitions, and simple facts" : settings.difficulty === "Medium" ? "application, understanding, and comparing concepts" : "analysis, synthesis, evaluation, and critical thinking"}.
-- Make questions diverse — cover different parts of the material. Do not repeat similar questions.
-- Each question must be unique and test a different concept or angle.
-
-Return ONLY valid JSON. No markdown, no backticks, no explanation outside the JSON.`;
-
-    // Calculate tokens needed: ~200 tokens per question + ~3000 for study kit content
-    const maxTokens = Math.min(3000 + questionCount * 200, 16000);
-
-    // Race all models in parallel — first successful response wins
-    const result = await Promise.any(
-      MODELS.map((model) => callLLM(model, prompt, API_KEY, maxTokens, 55000))
-    ).catch(() => null);
-
-    if (!result) {
+    let studyKit: Record<string, unknown>;
+    try {
+      const raw = await raceModels(studyKitPrompt, API_KEY, 8000, 50000);
+      studyKit = repairAndParseJSON(raw);
+      if (!studyKit.questions || !Array.isArray(studyKit.questions)) {
+        throw new Error("Missing questions");
+      }
+    } catch {
       return NextResponse.json(
-        { error: "All models are busy. Please try again in a moment." },
+        { error: "Failed to generate study kit. Please try again." },
         { status: 500 }
       );
     }
 
-    const parsed = extractJSON(result);
+    let allQuestions = studyKit.questions as any[];
 
-    if (!parsed.questions || !Array.isArray(parsed.questions)) {
-      return NextResponse.json(
-        { error: "Invalid response from AI. Please try again." },
-        { status: 500 }
-      );
+    // Step 2: If we need more questions, make extra calls until we hit the exact count
+    let attempts = 0;
+    while (allQuestions.length < requestedCount && attempts < 3) {
+      attempts++;
+      const remaining = requestedCount - allQuestions.length;
+      const existingSummary = allQuestions.map((q: any, i: number) => `${i + 1}. ${q.question}`).join("\n");
+      const extraPrompt = buildQuestionsOnlyPrompt(content, settings, remaining, existingSummary);
+
+      try {
+        const raw = await raceModels(extraPrompt, API_KEY, Math.min(remaining * 250, 8000), 50000);
+        const extraQuestions = parseJSONArray(raw);
+        if (Array.isArray(extraQuestions) && extraQuestions.length > 0) {
+          allQuestions = allQuestions.concat(extraQuestions);
+        } else {
+          break; // No questions returned, stop retrying
+        }
+      } catch {
+        break; // Call failed, return what we have
+      }
     }
 
-    // Enforce exact question count — trim extras, never return more than requested
-    parsed.questions = (parsed.questions as any[]).slice(0, questionCount);
+    // Enforce exact count
+    studyKit.questions = allQuestions.slice(0, requestedCount);
 
-    return NextResponse.json(parsed);
+    return NextResponse.json(studyKit);
   } catch (error: any) {
     console.error("Generate error:", error);
     return NextResponse.json(
