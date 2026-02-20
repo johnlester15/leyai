@@ -3,13 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const MODELS = [
-  "arcee-ai/trinity-large-preview:free",   // 1st: primary free model
-  "openai/gpt-3.5-turbo",                   // 2nd: best backup (paid, always works)
-  "google/gemma-2-9b-it:free",              // 3rd: free fallback
-  "meta-llama/llama-3.1-8b-instruct:free",  // 4th: free fallback
-  "mistralai/mistral-7b-instruct:free",     // 5th: free fallback
-];
+const PRIMARY_MODEL = "arcee-ai/trinity-large-preview:free";
+const BACKUP_MODEL  = "openai/gpt-3.5-turbo";
 
 async function callLLM(
   model: string,
@@ -52,18 +47,15 @@ async function callLLM(
   }
 }
 
-// Try models one by one in order — first success wins, only moves to next on failure
-async function tryModelsSequentially(prompt: string, apiKey: string, maxTokens: number, timeoutMs: number): Promise<string> {
-  let lastError = "";
-  for (const model of MODELS) {
-    try {
-      return await callLLM(model, prompt, apiKey, maxTokens, timeoutMs);
-    } catch (err: any) {
-      lastError = err.message || "Unknown error";
-      continue; // Try next model
-    }
+// Try Trinity (10s) → if it fails, GPT (25s). Only 2 models, fast fallback.
+async function smartGenerate(prompt: string, apiKey: string, maxTokens: number): Promise<string> {
+  // Try free model first with short timeout
+  try {
+    return await callLLM(PRIMARY_MODEL, prompt, apiKey, maxTokens, 10000);
+  } catch {
+    // Free model failed — go straight to GPT (reliable)
+    return await callLLM(BACKUP_MODEL, prompt, apiKey, maxTokens, 25000);
   }
-  throw new Error(`All models failed. Last error: ${lastError}`);
 }
 
 function repairAndParseJSON(raw: string): Record<string, unknown> {
@@ -191,9 +183,11 @@ export async function POST(req: NextRequest) {
     const firstCount = Math.min(requestedCount, 15);
     const studyKitPrompt = buildStudyKitPrompt(content, settings, firstCount);
 
+    const startTime = Date.now();
+
     let studyKit: Record<string, unknown>;
     try {
-      const raw = await tryModelsSequentially(studyKitPrompt, API_KEY, 8000, 20000);
+      const raw = await smartGenerate(studyKitPrompt, API_KEY, 8000);
       studyKit = repairAndParseJSON(raw);
       if (!studyKit.questions || !Array.isArray(studyKit.questions)) {
         throw new Error("Missing questions");
@@ -207,24 +201,22 @@ export async function POST(req: NextRequest) {
 
     let allQuestions = studyKit.questions as any[];
 
-    // Step 2: If we need more questions, make extra calls until we hit the exact count
-    let attempts = 0;
-    while (allQuestions.length < requestedCount && attempts < 3) {
-      attempts++;
+    // Step 2: If we need more questions, use GPT directly (fast, reliable)
+    // Only attempt if we have enough time left (at least 20s)
+    if (allQuestions.length < requestedCount && (Date.now() - startTime) < 35000) {
       const remaining = requestedCount - allQuestions.length;
       const existingSummary = allQuestions.map((q: any, i: number) => `${i + 1}. ${q.question}`).join("\n");
       const extraPrompt = buildQuestionsOnlyPrompt(content, settings, remaining, existingSummary);
 
       try {
-        const raw = await tryModelsSequentially(extraPrompt, API_KEY, Math.min(remaining * 250, 8000), 20000);
+        // Use GPT directly for Step 2 — fast and reliable, no wasting time on free models
+        const raw = await callLLM(BACKUP_MODEL, extraPrompt, API_KEY, Math.min(remaining * 250, 8000), 20000);
         const extraQuestions = parseJSONArray(raw);
         if (Array.isArray(extraQuestions) && extraQuestions.length > 0) {
           allQuestions = allQuestions.concat(extraQuestions);
-        } else {
-          break; // No questions returned, stop retrying
         }
       } catch {
-        break; // Call failed, return what we have
+        // Step 2 failed — return what we have from Step 1
       }
     }
 
