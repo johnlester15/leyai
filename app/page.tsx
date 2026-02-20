@@ -4,7 +4,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { saveQuizData, loadQuizData, QuizData } from "@/lib/quiz-store";
 import { Settings, ChatMessage } from "@/app/lib/types";
-import { uploadFileInChunks } from "@/lib/chunk-upload";
+import { supabase } from "@/lib/supabase-client";
 import Navbar from "@/app/components/Navbar";
 import HeroSection from "@/app/components/HeroSection";
 import InputSection from "@/app/components/InputSection";
@@ -73,7 +73,7 @@ export default function StudyGenAI() {
       const MAX_DIRECT_SIZE = 4 * 1024 * 1024; // 4MB — Vercel API route limit is ~4.5MB
 
       if (uploadedFile.size <= MAX_DIRECT_SIZE) {
-        // Small file: send directly via FormData
+        // Small file: send directly via FormData to API route
         const formData = new FormData();
         formData.append("file", uploadedFile);
         formData.append("fileName", uploadedFile.name);
@@ -95,9 +95,20 @@ export default function StudyGenAI() {
         if (data.error) throw new Error(data.error);
         setExtractedText(data.text);
       } else {
-        // Large file: upload in chunks to Supabase, then extract from storage
-        const { storagePath } = await uploadFileInChunks(uploadedFile);
+        // Large file: upload directly to Supabase Storage from client, then extract server-side
+        const storagePath = `${Date.now()}-${uploadedFile.name}`;
+        const { error: uploadError } = await supabase.storage
+          .from("LeyaAI")
+          .upload(storagePath, uploadedFile, {
+            contentType: uploadedFile.type || "application/octet-stream",
+            upsert: true,
+          });
 
+        if (uploadError) {
+          throw new Error(`Upload failed: ${uploadError.message}`);
+        }
+
+        // Now tell the API to extract text from the uploaded file
         const res = await fetch("/api/extract", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
