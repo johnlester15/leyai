@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
+export const runtime = "nodejs";
+export const maxDuration = 60;
+
 const MODELS = [
   "arcee-ai/trinity-large-preview:free",
   "openai/gpt-3.5-turbo",
@@ -81,10 +84,13 @@ RULES:
       return NextResponse.json({ error: "API key not configured" }, { status: 500 });
     }
 
+    const maxTokens = Math.min(Math.max(4000, parseInt(settings.count || "10") * 200), 16000);
+
     for (const model of MODELS) {
       try {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 15000);
+        const timeoutMs = Math.max(25000, parseInt(settings.count || "10") * 1500);
+        const timeout = setTimeout(() => controller.abort(), Math.min(timeoutMs, 55000));
 
         const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
           method: "POST",
@@ -97,7 +103,7 @@ RULES:
           body: JSON.stringify({
             model,
             messages: [{ role: "user", content: prompt }],
-            max_tokens: 4000,
+            max_tokens: maxTokens,
             temperature: 0.3,
           }),
           signal: controller.signal,

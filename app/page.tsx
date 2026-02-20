@@ -134,7 +134,12 @@ export default function StudyGenAI() {
         body: JSON.stringify({ content, settings }),
       });
 
-      const data = await response.json();
+      let data;
+      try {
+        data = await response.json();
+      } catch {
+        throw new Error(`Server error: ${response.status}. Try again with fewer questions.`);
+      }
       if (!response.ok || data.error) throw new Error(data.error || "Generation failed");
 
       setQuizData(data);
