@@ -4,11 +4,71 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const MODELS = [
-  "arcee-ai/trinity-large-preview:free",
   "openai/gpt-3.5-turbo",
-  "stepfun/step-3.5-flash:free",
-  "z-ai/glm-4.5-air:free",
+  "mistralai/mistral-7b-instruct:free",
+  "google/gemma-2-9b-it:free",
+  "meta-llama/llama-3.1-8b-instruct:free",
 ];
+
+async function tryModel(
+  model: string,
+  prompt: string,
+  apiKey: string,
+  maxTokens: number,
+  timeoutMs: number
+): Promise<Record<string, unknown>> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://leyai.vercel.app",
+        "X-Title": "StudyGen AI",
+      },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: maxTokens,
+        temperature: 0.3,
+      }),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timer);
+
+    if (!response.ok) {
+      throw new Error(`Model ${model} returned ${response.status}`);
+    }
+
+    const data = await response.json();
+    let raw = data.choices?.[0]?.message?.content || "";
+
+    if (!raw) throw new Error("Empty response");
+
+    // Clean markdown fences if present
+    raw = raw.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+
+    // Try to extract JSON object if there's extra text around it
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error("No JSON object found in response");
+
+    const parsed = JSON.parse(jsonMatch[0]);
+
+    // Basic validation
+    if (!parsed.questions || !Array.isArray(parsed.questions)) {
+      throw new Error("Invalid response structure");
+    }
+
+    return parsed;
+  } catch (err) {
+    clearTimeout(timer);
+    throw err;
+  }
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -86,55 +146,24 @@ RULES:
 
     const maxTokens = Math.min(Math.max(4000, parseInt(settings.count || "10") * 200), 16000);
 
-    for (const model of MODELS) {
-      try {
-        const controller = new AbortController();
-        const timeoutMs = Math.max(25000, parseInt(settings.count || "10") * 1500);
-        const timeout = setTimeout(() => controller.abort(), Math.min(timeoutMs, 55000));
+    // Race all models in parallel — first successful response wins
+    const result = await Promise.any(
+      MODELS.map((model) => tryModel(model, prompt, API_KEY, maxTokens, 50000))
+    ).catch(() => null);
 
-        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${API_KEY}`,
-            "Content-Type": "application/json",
-            "HTTP-Referer": "http://localhost:3000",
-            "X-Title": "StudyGen AI",
-          },
-          body: JSON.stringify({
-            model,
-            messages: [{ role: "user", content: prompt }],
-            max_tokens: maxTokens,
-            temperature: 0.3,
-          }),
-          signal: controller.signal,
-        });
-
-        clearTimeout(timeout);
-
-        if (!response.ok) continue;
-
-        const data = await response.json();
-        let raw = data.choices?.[0]?.message?.content || "";
-
-        // Clean markdown if present
-        raw = raw.replace(/```json/g, "").replace(/```/g, "").trim();
-
-        // Validate JSON
-        const parsed = JSON.parse(raw);
-        return NextResponse.json(parsed);
-
-      } catch (err: any) {
-        if (err.name === "AbortError") continue;
-        continue;
-      }
+    if (result) {
+      return NextResponse.json(result);
     }
 
     return NextResponse.json(
-      { error: "All models failed. Try again with shorter text." },
+      { error: "All models are busy. Please try again in a moment." },
       { status: 500 }
     );
   } catch (error: any) {
     console.error("Generate error:", error);
-    return NextResponse.json({ error: error.message || "Failed to generate" }, { status: 500 });
+    return NextResponse.json(
+      { error: error.message || "Failed to generate. Please try again." },
+      { status: 500 }
+    );
   }
 }
