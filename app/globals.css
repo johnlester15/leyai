@@ -24,3 +24,69 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1c1c1c;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #3ecf8e;
+  border-radius: 5px;
+  transition: background 0.3s ease;
+  border: 2px solid #1c1c1c;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #34b27b;
+  box-shadow: 0 0 12px rgba(62, 207, 142, 0.4);
+}
+
+::-webkit-scrollbar-thumb:active {
+  background: #2a9a65;
+}
+
+/* Firefox Scrollbar */
+* {
+  scrollbar-color: #3ecf8e #1c1c1c;
+  scrollbar-width: thin;
+}
+
+/* Chat Scrollbar - Custom Styling */
+.chat-scrollbar::-webkit-scrollbar {
+  width: 8px;
+}
+
+.chat-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-scrollbar::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #3ecf8e 0%, #2a9a65 100%);
+  border-radius: 4px;
+  transition: all 0.3s ease;
+}
+
+.chat-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #34b27b 0%, #1f7850 100%);
+  box-shadow: 0 0 8px rgba(62, 207, 142, 0.6), inset 0 0 4px rgba(62, 207, 142, 0.3);
+}
+
+.chat-scrollbar {
+  scrollbar-color: #3ecf8e transparent;
+}
+
+/* Hide scrollbar while allowing scroll */
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
