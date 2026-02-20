@@ -81,7 +81,8 @@ export async function POST(req: NextRequest) {
 
     } else if (ext === "pdf") {
       try {
-        const pdf = require("pdf-parse");
+        const pdfModule = await import("pdf-parse");
+        const pdf = pdfModule.default || pdfModule;
         const pdfData = await pdf(buffer);
         text = (pdfData.text || "")
           .split('\n')
