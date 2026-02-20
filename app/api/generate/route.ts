@@ -52,19 +52,23 @@ async function callModel(
   }
 }
 
-// Try models sequentially: 8s each for free models, 25s for GPT. First success wins.
+// Race Trinity vs GPT in parallel — whichever responds first wins.
+// When Trinity is fast (free!), you save money. When it's slow, GPT catches it instantly.
 async function callLLM(prompt: string, apiKey: string, maxTokens: number): Promise<string> {
-  let lastError = "";
-  for (const model of MODELS) {
-    const timeout = model.includes("gpt") ? 25000 : 8000;
-    try {
-      return await callModel(model, prompt, apiKey, maxTokens, timeout);
-    } catch (err: any) {
-      lastError = err.message || "Unknown error";
-      continue;
+  try {
+    return await Promise.any([
+      callModel(MODELS[0], prompt, apiKey, maxTokens, 25000),  // Trinity (free)
+      callModel(MODELS[1], prompt, apiKey, maxTokens, 25000),  // GPT (reliable)
+    ]);
+  } catch {
+    // Both failed — try remaining free models one by one
+    for (let i = 2; i < MODELS.length; i++) {
+      try {
+        return await callModel(MODELS[i], prompt, apiKey, maxTokens, 10000);
+      } catch { continue; }
     }
+    throw new Error("All models failed");
   }
-  throw new Error(`All models failed. Last: ${lastError}`);
 }
 
 function repairAndParseJSON(raw: string): Record<string, unknown> {
