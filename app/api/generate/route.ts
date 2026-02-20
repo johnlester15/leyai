@@ -191,9 +191,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "API key not configured" }, { status: 500 });
     }
 
-    // Step 1: Generate study kit + ALL questions in one call
-    // GPT-3.5-turbo handles up to 30 questions easily in one shot
-    const studyKitPrompt = buildStudyKitPrompt(content, settings, requestedCount);
+    // Step 1: Generate study kit + questions
+    // For 20 or fewer — all in one call. For 30 — only 15 to keep output small.
+    const firstCount = requestedCount <= 20 ? requestedCount : 15;
+    const studyKitPrompt = buildStudyKitPrompt(content, settings, firstCount);
 
     let studyKit: Record<string, unknown>;
     try {
