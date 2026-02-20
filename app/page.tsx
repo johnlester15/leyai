@@ -70,73 +70,40 @@ export default function StudyGenAI() {
 
     setIsExtracting(true);
     try {
-      let extractedData = null;
-      let useSupabase = uploadedFile.size > 3.5 * 1024 * 1024; // Files > 3.5MB always use Supabase
+      // Sanitize file name for storage path (remove special chars, spaces → underscores)
+      const safeName = uploadedFile.name
+        .replace(/[^a-zA-Z0-9._-]/g, "_");
+      const storagePath = `${Date.now()}-${safeName}`;
 
-      // Try direct upload first for small files
-      if (!useSupabase) {
-        try {
-          const formData = new FormData();
-          formData.append("file", uploadedFile);
-          formData.append("fileName", uploadedFile.name);
-
-          const res = await fetch("/api/extract", {
-            method: "POST",
-            body: formData,
-          });
-
-          if (!res.ok) {
-            // Any server error (413, 500, etc.) → fall back to Supabase
-            useSupabase = true;
-          } else {
-            const data = await res.json();
-            if (data.error) {
-              useSupabase = true;
-            } else {
-              extractedData = data;
-            }
-          }
-        } catch {
-          // Network error, JSON parse error, etc. → fall back to Supabase
-          useSupabase = true;
-        }
-      }
-
-      // Supabase fallback: upload to storage, then extract server-side
-      if (useSupabase && !extractedData) {
-        const storagePath = `${Date.now()}-${uploadedFile.name}`;
-        const { error: uploadError } = await supabase.storage
-          .from("LeyaAI")
-          .upload(storagePath, uploadedFile, {
-            contentType: uploadedFile.type || "application/octet-stream",
-            upsert: true,
-          });
-
-        if (uploadError) {
-          throw new Error(`Upload failed: ${uploadError.message}`);
-        }
-
-        const res = await fetch("/api/extract", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ storagePath, fileName: uploadedFile.name }),
+      // Always upload to Supabase Storage first (avoids server body size limits / 413 errors)
+      const { error: uploadError } = await supabase.storage
+        .from("LeyaAI")
+        .upload(storagePath, uploadedFile, {
+          contentType: uploadedFile.type || "application/octet-stream",
+          upsert: true,
         });
 
-        if (!res.ok) {
-          const errorData = await res.json().catch(() => ({ error: `Server error: ${res.status}` }));
-          throw new Error(errorData.error || `Server error: ${res.status}`);
-        }
-
-        const data = await res.json().catch(() => {
-          throw new Error("Invalid response from server");
-        });
-
-        if (data.error) throw new Error(data.error);
-        extractedData = data;
+      if (uploadError) {
+        throw new Error(`Upload failed: ${uploadError.message}`);
       }
 
-      if (extractedData) {
-        setExtractedText(extractedData.text);
+      // Send only the storage path to the extract API (tiny JSON body)
+      const res = await fetch("/api/extract", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ storagePath, fileName: uploadedFile.name }),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => null);
+        throw new Error(errorData?.error || `Server error: ${res.status}`);
+      }
+
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+
+      if (data?.text) {
+        setExtractedText(data.text);
       } else {
         throw new Error("Failed to extract text from file");
       }

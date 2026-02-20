@@ -6,16 +6,5 @@
     "app/api/generate/route.ts": {
       "maxDuration": 30
     }
-  },
-  "headers": [
-    {
-      "source": "/api/:path*",
-      "headers": [
-        {
-          "key": "Content-Length",
-          "value": "52428800"
-        }
-      ]
-    }
-  ]
+  }
 }

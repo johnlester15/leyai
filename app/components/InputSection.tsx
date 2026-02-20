@@ -3,8 +3,8 @@ import { InputSectionProps } from "@/app/lib/types";
 
 export default function InputSection({
   useTextMode,
-  setUseTextMode,
-  file,
+  setUseTextMode,//dsadsad
+  file,//dsadsadsad
   pastedText,
   setPastedText,
   extractedText,

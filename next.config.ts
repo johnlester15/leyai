@@ -2,9 +2,6 @@ import type { NextConfig } from "next";
 
 // LeyAI Next.js Configuration
 const nextConfig: NextConfig = {
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
   typescript: {
     ignoreBuildErrors: true,
   },
