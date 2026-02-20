@@ -52,10 +52,45 @@ async function callLLM(
 }
 
 function extractJSON(raw: string): Record<string, unknown> {
-  const cleaned = raw.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+  let cleaned = raw.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+
+  // Try direct parse first
   const match = cleaned.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error("No JSON found");
-  return JSON.parse(match[0]);
+  if (match) {
+    try {
+      return JSON.parse(match[0]);
+    } catch {
+      // JSON may be truncated — try to repair it
+    }
+  }
+
+  // Repair truncated JSON: find the outermost { and try to close it
+  const start = cleaned.indexOf("{");
+  if (start === -1) throw new Error("No JSON found");
+  let jsonStr = cleaned.substring(start);
+
+  // Remove any trailing incomplete item (cut mid-string, mid-object, etc.)
+  // Find the last complete question object by finding last "}" before truncation
+  const lastCompleteObj = jsonStr.lastIndexOf("}");
+  if (lastCompleteObj === -1) throw new Error("No JSON found");
+
+  jsonStr = jsonStr.substring(0, lastCompleteObj + 1);
+
+  // Close any unclosed arrays and objects
+  const openBraces = (jsonStr.match(/\{/g) || []).length;
+  const closeBraces = (jsonStr.match(/\}/g) || []).length;
+  const openBrackets = (jsonStr.match(/\[/g) || []).length;
+  const closeBrackets = (jsonStr.match(/\]/g) || []).length;
+
+  // Add missing closing brackets and braces
+  jsonStr += "]".repeat(Math.max(0, openBrackets - closeBrackets));
+  jsonStr += "}".repeat(Math.max(0, openBraces - closeBraces));
+
+  try {
+    return JSON.parse(jsonStr);
+  } catch {
+    throw new Error("Could not parse AI response. Please try again.");
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -142,8 +177,8 @@ QUESTION RULES (VERY IMPORTANT):
 
 Return ONLY valid JSON. No markdown, no backticks, no explanation outside the JSON.`;
 
-    // Calculate tokens needed: ~150 tokens per question + ~2000 for study kit content
-    const maxTokens = Math.min(2000 + questionCount * 150, 16000);
+    // Calculate tokens needed: ~200 tokens per question + ~3000 for study kit content
+    const maxTokens = Math.min(3000 + questionCount * 200, 16000);
 
     // Race all models in parallel — first successful response wins
     const result = await Promise.any(
@@ -165,6 +200,9 @@ Return ONLY valid JSON. No markdown, no backticks, no explanation outside the JS
         { status: 500 }
       );
     }
+
+    // Enforce exact question count — trim extras, never return more than requested
+    parsed.questions = (parsed.questions as any[]).slice(0, questionCount);
 
     return NextResponse.json(parsed);
   } catch (error: any) {

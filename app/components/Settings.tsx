@@ -43,7 +43,7 @@ export default function Settings({
           <select className="w-full bg-[#1c1c1c] border border-[#2e2e2e] rounded-lg px-2 py-2 text-xs outline-none focus:border-[#3ecf8e]"
             aria-label="Number of questions"
             value={settings.count} onChange={(e) => setSettings({ ...settings, count: e.target.value })}>
-            <option value="5">5</option><option value="10">10</option><option value="15">15</option><option value="30">30</option><option value="50">50</option><option value="70">70</option>
+            <option value="5">5</option><option value="10">10</option><option value="15">15</option><option value="30">30</option><option value="50">50</option>
           </select>
         </div>
       </div>
