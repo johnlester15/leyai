@@ -29,3 +29,4 @@ export default function StudySummaryCard({ quizData }: StudySummaryCardProps) {
     </div>
   );
 }
+//  this is a web app
