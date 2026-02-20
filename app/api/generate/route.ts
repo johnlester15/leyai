@@ -3,10 +3,15 @@ import { NextRequest, NextResponse } from "next/server";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const PRIMARY_MODEL = "arcee-ai/trinity-large-preview:free";
-const BACKUP_MODEL  = "openai/gpt-3.5-turbo";
+const MODELS = [
+  "arcee-ai/trinity-large-preview:free",     // 1st: free
+  "openai/gpt-3.5-turbo",                    // 2nd: paid but confirmed working
+  "stepfun/step-3.5-flash:free",             // 3rd: free
+  "z-ai/glm-4.5-air:free",                   // 4th: free
+  "nvidia/nemotron-3-nano-30b-a3b:free",     // 5th: free
+];
 
-async function callLLM(
+async function callModel(
   model: string,
   prompt: string,
   apiKey: string,
@@ -47,15 +52,19 @@ async function callLLM(
   }
 }
 
-// Try Trinity (10s) → if it fails, GPT (25s). Only 2 models, fast fallback.
-async function smartGenerate(prompt: string, apiKey: string, maxTokens: number): Promise<string> {
-  // Try free model first with short timeout
-  try {
-    return await callLLM(PRIMARY_MODEL, prompt, apiKey, maxTokens, 10000);
-  } catch {
-    // Free model failed — go straight to GPT (reliable)
-    return await callLLM(BACKUP_MODEL, prompt, apiKey, maxTokens, 25000);
+// Try models sequentially: 8s each for free models, 25s for GPT. First success wins.
+async function callLLM(prompt: string, apiKey: string, maxTokens: number): Promise<string> {
+  let lastError = "";
+  for (const model of MODELS) {
+    const timeout = model.includes("gpt") ? 25000 : 8000;
+    try {
+      return await callModel(model, prompt, apiKey, maxTokens, timeout);
+    } catch (err: any) {
+      lastError = err.message || "Unknown error";
+      continue;
+    }
   }
+  throw new Error(`All models failed. Last: ${lastError}`);
 }
 
 function repairAndParseJSON(raw: string): Record<string, unknown> {
@@ -178,16 +187,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "API key not configured" }, { status: 500 });
     }
 
-    // Step 1: Generate study kit + first set of questions
-    // For 15 or fewer, ask for all. For more, ask for 15 to keep output small and reliable.
-    const firstCount = Math.min(requestedCount, 15);
-    const studyKitPrompt = buildStudyKitPrompt(content, settings, firstCount);
-
-    const startTime = Date.now();
+    // Step 1: Generate study kit + ALL questions in one call
+    // GPT-3.5-turbo handles up to 30 questions easily in one shot
+    const studyKitPrompt = buildStudyKitPrompt(content, settings, requestedCount);
 
     let studyKit: Record<string, unknown>;
     try {
-      const raw = await smartGenerate(studyKitPrompt, API_KEY, 8000);
+      const raw = await callLLM(studyKitPrompt, API_KEY, 8000);
       studyKit = repairAndParseJSON(raw);
       if (!studyKit.questions || !Array.isArray(studyKit.questions)) {
         throw new Error("Missing questions");
@@ -201,22 +207,20 @@ export async function POST(req: NextRequest) {
 
     let allQuestions = studyKit.questions as any[];
 
-    // Step 2: If we need more questions, use GPT directly (fast, reliable)
-    // Only attempt if we have enough time left (at least 20s)
-    if (allQuestions.length < requestedCount && (Date.now() - startTime) < 35000) {
+    // Step 2: If GPT gave fewer than requested, fetch the rest
+    if (allQuestions.length < requestedCount) {
       const remaining = requestedCount - allQuestions.length;
       const existingSummary = allQuestions.map((q: any, i: number) => `${i + 1}. ${q.question}`).join("\n");
       const extraPrompt = buildQuestionsOnlyPrompt(content, settings, remaining, existingSummary);
 
       try {
-        // Use GPT directly for Step 2 — fast and reliable, no wasting time on free models
-        const raw = await callLLM(BACKUP_MODEL, extraPrompt, API_KEY, Math.min(remaining * 250, 8000), 20000);
+        const raw = await callLLM(extraPrompt, API_KEY, Math.min(remaining * 250, 4000));
         const extraQuestions = parseJSONArray(raw);
         if (Array.isArray(extraQuestions) && extraQuestions.length > 0) {
           allQuestions = allQuestions.concat(extraQuestions);
         }
       } catch {
-        // Step 2 failed — return what we have from Step 1
+        // Return what we have
       }
     }
 
