@@ -5,7 +5,7 @@ import ModuleOverview from "./ModuleOverview";
 
 interface ResultsPanelProps {
   showResults: boolean;
-  quizData: QuizData | null;
+  quizData: QuizData | null;//dsa
   chatInput: string;
   setChatInput: (text: string) => void;
   chatMessages: ChatMessage[];
