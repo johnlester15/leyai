@@ -78,26 +78,20 @@ export default function StudyGenAI() {
       }
 
       // Send to extract API
-      const payload = storagePath 
-        ? { storagePath }
-        : await (async () => {
-            const formData = new FormData();
-            formData.append("file", uploadedFile);
-            return formData;
-          })();
-
-      const res = await fetch("/api/extract", { 
+      const fetchOptions: RequestInit = {
         method: "POST",
-        ...(storagePath 
-          ? { 
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(payload)
-            }
-          : {
-              body: payload
-            }
-        )
-      });
+      };
+
+      if (storagePath) {
+        fetchOptions.headers = { "Content-Type": "application/json" };
+        fetchOptions.body = JSON.stringify({ storagePath });
+      } else {
+        const formData = new FormData();
+        formData.append("file", uploadedFile);
+        fetchOptions.body = formData;
+      }
+
+      const res = await fetch("/api/extract", fetchOptions);
       
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({ error: `Server error: ${res.status}` }));
