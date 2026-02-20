@@ -4,10 +4,11 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const MODELS = [
-  "openai/gpt-3.5-turbo",
-  "mistralai/mistral-7b-instruct:free",
-  "google/gemma-2-9b-it:free",
-  "meta-llama/llama-3.1-8b-instruct:free",
+  "arcee-ai/trinity-large-preview:free",   // 1st: primary free model
+  "mistralai/mistral-7b-instruct:free",     // 2nd: free fallback
+  "google/gemma-2-9b-it:free",              // 3rd: free fallback
+  "meta-llama/llama-3.1-8b-instruct:free",  // 4th: free fallback
+  "openai/gpt-3.5-turbo",                   // 5th: last resort (paid)
 ];
 
 async function callLLM(
@@ -51,11 +52,18 @@ async function callLLM(
   }
 }
 
-// Race models in parallel — first success wins
-async function raceModels(prompt: string, apiKey: string, maxTokens: number, timeoutMs: number): Promise<string> {
-  return Promise.any(
-    MODELS.map((model) => callLLM(model, prompt, apiKey, maxTokens, timeoutMs))
-  );
+// Try models one by one in order — first success wins, only moves to next on failure
+async function tryModelsSequentially(prompt: string, apiKey: string, maxTokens: number, timeoutMs: number): Promise<string> {
+  let lastError = "";
+  for (const model of MODELS) {
+    try {
+      return await callLLM(model, prompt, apiKey, maxTokens, timeoutMs);
+    } catch (err: any) {
+      lastError = err.message || "Unknown error";
+      continue; // Try next model
+    }
+  }
+  throw new Error(`All models failed. Last error: ${lastError}`);
 }
 
 function repairAndParseJSON(raw: string): Record<string, unknown> {
@@ -185,7 +193,7 @@ export async function POST(req: NextRequest) {
 
     let studyKit: Record<string, unknown>;
     try {
-      const raw = await raceModels(studyKitPrompt, API_KEY, 8000, 50000);
+      const raw = await tryModelsSequentially(studyKitPrompt, API_KEY, 8000, 50000);
       studyKit = repairAndParseJSON(raw);
       if (!studyKit.questions || !Array.isArray(studyKit.questions)) {
         throw new Error("Missing questions");
@@ -208,7 +216,7 @@ export async function POST(req: NextRequest) {
       const extraPrompt = buildQuestionsOnlyPrompt(content, settings, remaining, existingSummary);
 
       try {
-        const raw = await raceModels(extraPrompt, API_KEY, Math.min(remaining * 250, 8000), 50000);
+        const raw = await tryModelsSequentially(extraPrompt, API_KEY, Math.min(remaining * 250, 8000), 50000);
         const extraQuestions = parseJSONArray(raw);
         if (Array.isArray(extraQuestions) && extraQuestions.length > 0) {
           allQuestions = allQuestions.concat(extraQuestions);
