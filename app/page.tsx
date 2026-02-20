@@ -70,28 +70,15 @@ export default function StudyGenAI() {
 
     setIsExtracting(true);
     try {
-      let storagePath: string | null = null;
+      // Always send file directly via FormData (works locally and on Vercel for files < 4.5MB)
+      const formData = new FormData();
+      formData.append("file", uploadedFile);
+      formData.append("fileName", uploadedFile.name);
 
-      // Use chunked upload for files larger than 3MB
-      if (uploadedFile.size > 3 * 1024 * 1024) {
-        storagePath = await uploadFileInChunks(uploadedFile);
-      }
-
-      // Send to extract API
-      const fetchOptions: RequestInit = {
+      const res = await fetch("/api/extract", {
         method: "POST",
-      };
-
-      if (storagePath) {
-        fetchOptions.headers = { "Content-Type": "application/json" };
-        fetchOptions.body = JSON.stringify({ storagePath });
-      } else {
-        const formData = new FormData();
-        formData.append("file", uploadedFile);
-        fetchOptions.body = formData;
-      }
-
-      const res = await fetch("/api/extract", fetchOptions);
+        body: formData,
+      });
       
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({ error: `Server error: ${res.status}` }));

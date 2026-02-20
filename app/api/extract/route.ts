@@ -11,39 +11,59 @@ const supabase = createClient(
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { storagePath, fileName } = body;
-
-    if (!storagePath && !fileName) {
-      return NextResponse.json({ error: "No file path or name provided." }, { status: 400 });
-    }
-
     let buffer: Buffer;
+    let fileName: string = "";
+    let ext: string = "";
 
-    // If using chunked upload from Supabase
-    if (storagePath) {
-      const { data, error } = await supabase.storage
-        .from("LeyaAI")
-        .download(storagePath);
+    const contentType = req.headers.get("content-type") || "";
 
-      if (error || !data) {
-        return NextResponse.json({ error: "Failed to download file from storage" }, { status: 500 });
-      }
-
-      buffer = Buffer.from(await data.arrayBuffer());
-    } else {
-      // Direct FormData upload (for backward compatibility with small files)
+    if (contentType.includes("multipart/form-data")) {
+      // Direct file upload via FormData
       const formData = await req.formData();
       const file = formData.get("file") as File;
+      const formFileName = formData.get("fileName") as string;
 
       if (!file) {
         return NextResponse.json({ error: "No file provided." }, { status: 400 });
       }
 
+      fileName = formFileName || file.name || "";
       buffer = Buffer.from(await file.arrayBuffer());
+      ext = fileName.split(".").pop()?.toLowerCase() || "";
+    } else {
+      // JSON body with Supabase storage path (for production/Vercel)
+      const body = await req.json();
+      const { storagePath, fileName: bodyFileName } = body;
+
+      if (!storagePath && !bodyFileName) {
+        return NextResponse.json({ error: "No file path or name provided." }, { status: 400 });
+      }
+
+      fileName = bodyFileName || storagePath || "";
+      ext = fileName.split(".").pop()?.toLowerCase() || "";
+
+      if (storagePath) {
+        const { data, error } = await supabase.storage
+          .from("LeyaAI")
+          .download(storagePath);
+
+        if (error || !data) {
+          console.error("Supabase download error:", error);
+          return NextResponse.json({ 
+            error: "Failed to download file from storage." 
+          }, { status: 500 });
+        }
+
+        buffer = Buffer.from(await data.arrayBuffer());
+      } else {
+        return NextResponse.json({ error: "No file data provided." }, { status: 400 });
+      }
     }
 
-    const ext = (storagePath || fileName).split(".").pop()?.toLowerCase();
+    if (!ext) {
+      return NextResponse.json({ error: "Cannot determine file type." }, { status: 400 });
+    }
+
     let text = "";
 
     if (ext === "txt") {
