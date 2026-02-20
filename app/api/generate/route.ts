@@ -4,6 +4,7 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const MODELS = [
+  "arcee-ai/trinity-large-preview:free",
   "openai/gpt-3.5-turbo",
   "mistralai/mistral-7b-instruct:free",
   "google/gemma-2-9b-it:free",
