@@ -70,27 +70,52 @@ export default function StudyGenAI() {
 
     setIsExtracting(true);
     try {
-      // Always send file directly via FormData (works locally and on Vercel for files < 4.5MB)
-      const formData = new FormData();
-      formData.append("file", uploadedFile);
-      formData.append("fileName", uploadedFile.name);
+      const MAX_DIRECT_SIZE = 4 * 1024 * 1024; // 4MB — Vercel API route limit is ~4.5MB
 
-      const res = await fetch("/api/extract", {
-        method: "POST",
-        body: formData,
-      });
-      
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({ error: `Server error: ${res.status}` }));
-        throw new Error(errorData.error || `Server error: ${res.status}`);
+      if (uploadedFile.size <= MAX_DIRECT_SIZE) {
+        // Small file: send directly via FormData
+        const formData = new FormData();
+        formData.append("file", uploadedFile);
+        formData.append("fileName", uploadedFile.name);
+
+        const res = await fetch("/api/extract", {
+          method: "POST",
+          body: formData,
+        });
+
+        if (!res.ok) {
+          const errorData = await res.json().catch(() => ({ error: `Server error: ${res.status}` }));
+          throw new Error(errorData.error || `Server error: ${res.status}`);
+        }
+
+        const data = await res.json().catch(() => {
+          throw new Error("Invalid response from server");
+        });
+
+        if (data.error) throw new Error(data.error);
+        setExtractedText(data.text);
+      } else {
+        // Large file: upload in chunks to Supabase, then extract from storage
+        const { storagePath } = await uploadFileInChunks(uploadedFile);
+
+        const res = await fetch("/api/extract", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ storagePath, fileName: uploadedFile.name }),
+        });
+
+        if (!res.ok) {
+          const errorData = await res.json().catch(() => ({ error: `Server error: ${res.status}` }));
+          throw new Error(errorData.error || `Server error: ${res.status}`);
+        }
+
+        const data = await res.json().catch(() => {
+          throw new Error("Invalid response from server");
+        });
+
+        if (data.error) throw new Error(data.error);
+        setExtractedText(data.text);
       }
-      
-      const data = await res.json().catch(() => {
-        throw new Error("Invalid response from server");
-      });
-      
-      if (data.error) throw new Error(data.error);
-      setExtractedText(data.text);
     } catch (err: any) {
       setError(`Could not read file: ${err.message}`);
     } finally {

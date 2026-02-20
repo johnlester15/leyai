@@ -1,7 +1,8 @@
-export async function uploadFileInChunks(file: File, onProgress?: (progress: number) => void): Promise<string> {
+export async function uploadFileInChunks(file: File, onProgress?: (progress: number) => void): Promise<{ uploadId: string; storagePath: string }> {
   const CHUNK_SIZE = 3 * 1024 * 1024; // 3MB chunks
   const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
   const uploadId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  let storagePath = "";
 
   for (let i = 0; i < totalChunks; i++) {
     const start = i * CHUNK_SIZE;
@@ -18,7 +19,7 @@ export async function uploadFileInChunks(file: File, onProgress?: (progress: num
 
     const response = await fetch("/api/upload-chunk", {
       method: "POST",
-      body: formData,//sd
+      body: formData,
     });
 
     if (!response.ok) {
@@ -26,9 +27,14 @@ export async function uploadFileInChunks(file: File, onProgress?: (progress: num
       throw new Error(error.error || `Upload failed: ${response.status}`);
     }
 
+    const result = await response.json();
+    if (result.complete && result.storagePath) {
+      storagePath = result.storagePath;
+    }
+
     const progress = Math.round(((i + 1) / totalChunks) * 100);
     onProgress?.(progress);
   }
 
-  return uploadId;
+  return { uploadId, storagePath };
 }
