@@ -70,39 +70,77 @@ export default function StudyGenAI() {
 
     setIsExtracting(true);
     try {
-      // Upload file to Supabase Storage from client (bypasses Vercel body limit entirely)
-      const storagePath = `${Date.now()}-${uploadedFile.name}`;
-      const { error: uploadError } = await supabase.storage
-        .from("LeyaAI")
-        .upload(storagePath, uploadedFile, {
-          contentType: uploadedFile.type || "application/octet-stream",
-          upsert: true,
+      const MAX_DIRECT_SIZE = 3.5 * 1024 * 1024; // 3.5MB safe limit for Vercel
+
+      if (uploadedFile.size <= MAX_DIRECT_SIZE) {
+        // Small file: send directly to API route (fast, no Supabase needed)
+        const formData = new FormData();
+        formData.append("file", uploadedFile);
+        formData.append("fileName", uploadedFile.name);
+
+        const res = await fetch("/api/extract", {
+          method: "POST",
+          body: formData,
         });
 
-      if (uploadError) {
-        throw new Error(`Upload failed: ${uploadError.message}`);
+        if (res.status === 413) {
+          // Hit Vercel limit unexpectedly — fall through to Supabase path
+          throw new Error("FALLBACK_TO_SUPABASE");
+        }
+
+        if (!res.ok) {
+          const errorData = await res.json().catch(() => ({ error: `Server error: ${res.status}` }));
+          throw new Error(errorData.error || `Server error: ${res.status}`);
+        }
+
+        const data = await res.json().catch(() => {
+          throw new Error("Invalid response from server");
+        });
+
+        if (data.error) throw new Error(data.error);
+        setExtractedText(data.text);
+      } else {
+        throw new Error("FALLBACK_TO_SUPABASE");
       }
-
-      // Tell the API to download from Supabase and extract text
-      const res = await fetch("/api/extract", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ storagePath, fileName: uploadedFile.name }),
-      });
-
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({ error: `Server error: ${res.status}` }));
-        throw new Error(errorData.error || `Server error: ${res.status}`);
-      }
-
-      const data = await res.json().catch(() => {
-        throw new Error("Invalid response from server");
-      });
-
-      if (data.error) throw new Error(data.error);
-      setExtractedText(data.text);
     } catch (err: any) {
-      setError(`Could not read file: ${err.message}`);
+      if (err.message === "FALLBACK_TO_SUPABASE") {
+        // Large file or 413: upload to Supabase, then extract server-side
+        try {
+          const storagePath = `${Date.now()}-${uploadedFile.name}`;
+          const { error: uploadError } = await supabase.storage
+            .from("LeyaAI")
+            .upload(storagePath, uploadedFile, {
+              contentType: uploadedFile.type || "application/octet-stream",
+              upsert: true,
+            });
+
+          if (uploadError) {
+            throw new Error(`Upload failed: ${uploadError.message}`);
+          }
+
+          const res = await fetch("/api/extract", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ storagePath, fileName: uploadedFile.name }),
+          });
+
+          if (!res.ok) {
+            const errorData = await res.json().catch(() => ({ error: `Server error: ${res.status}` }));
+            throw new Error(errorData.error || `Server error: ${res.status}`);
+          }
+
+          const data = await res.json().catch(() => {
+            throw new Error("Invalid response from server");
+          });
+
+          if (data.error) throw new Error(data.error);
+          setExtractedText(data.text);
+        } catch (supaErr: any) {
+          setError(`Could not read file: ${supaErr.message}`);
+        }
+      } else {
+        setError(`Could not read file: ${err.message}`);
+      }
     } finally {
       setIsExtracting(false);
     }
