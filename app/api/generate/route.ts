@@ -10,13 +10,13 @@ const MODELS = [
   "meta-llama/llama-3.1-8b-instruct:free",
 ];
 
-async function tryModel(
+async function callLLM(
   model: string,
   prompt: string,
   apiKey: string,
   maxTokens: number,
   timeoutMs: number
-): Promise<Record<string, unknown>> {
+): Promise<string> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -27,7 +27,7 @@ async function tryModel(
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
         "HTTP-Referer": "https://leyai.vercel.app",
-        "X-Title": "StudyGen AI",
+        "X-Title": "LEYANI AI",
       },
       body: JSON.stringify({
         model,
@@ -39,126 +39,134 @@ async function tryModel(
     });
 
     clearTimeout(timer);
-
-    if (!response.ok) {
-      throw new Error(`Model ${model} returned ${response.status}`);
-    }
+    if (!response.ok) throw new Error(`${model}: ${response.status}`);
 
     const data = await response.json();
-    let raw = data.choices?.[0]?.message?.content || "";
-
+    const raw = data.choices?.[0]?.message?.content || "";
     if (!raw) throw new Error("Empty response");
-
-    // Clean markdown fences if present
-    raw = raw.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
-
-    // Try to extract JSON object if there's extra text around it
-    const jsonMatch = raw.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error("No JSON object found in response");
-
-    const parsed = JSON.parse(jsonMatch[0]);
-
-    // Basic validation
-    if (!parsed.questions || !Array.isArray(parsed.questions)) {
-      throw new Error("Invalid response structure");
-    }
-
-    return parsed;
+    return raw;
   } catch (err) {
     clearTimeout(timer);
     throw err;
   }
 }
 
+function extractJSON(raw: string): Record<string, unknown> {
+  const cleaned = raw.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+  const match = cleaned.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error("No JSON found");
+  return JSON.parse(match[0]);
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { content, settings } = await req.json();
-
-    const prompt = `You are an expert study assistant. Analyze the following study material and generate a comprehensive study kit in JSON format.
-
-STUDY MATERIAL:
-${content}
-
-SETTINGS:
-- Quiz Type: ${settings.type} (Mixed = both MCQ and Identification, MCQ = multiple choice only, Identification = fill-in-the-blank only)
-- Difficulty: ${settings.difficulty}
-- Number of Questions: ${settings.count}
-
-Generate a JSON object with EXACTLY this structure:
-
-{
-  "summary": "A clear, student-friendly explanation of the material. Write 150–300 words in plain English. Use simple language a student can easily read and understand. Break it into short paragraphs — each covering one main idea. Explain WHY things matter, not just WHAT they are. Write as if you are a friendly teacher giving a quick but meaningful overview.",
-  
-  "objectives": [
-    "After studying this material, students will be able to...",
-    "...at least 3–5 clear learning objectives"
-  ],
-  
-  "key_concepts": [
-    "concept1", "concept2", "concept3"
-  ],
-  
-  "glossary": [
-    {
-      "term": "Term Name",
-      "definition": "A clear, concise definition in 1–2 sentences that a student can understand."
-    }
-  ],
-  
-  "case_studies": [
-    {
-      "title": "Short descriptive title for the scenario",
-      "scenario": "A realistic real-world scenario (3–5 sentences) that applies the concepts from the material. Make it relatable and interesting.",
-      "lesson": "What this scenario teaches — connect it back to 1–2 key concepts from the material."
-    }
-  ],
-  
-  "questions": [
-    {
-      "type": "MCQ",
-      "question": "Question text here?",
-      "options": ["Option A", "Option B", "Option C", "Option D"],
-      "answer": "The correct option text exactly as written above",
-      "explanation": "2–3 sentence explanation of why this is correct and what concept it tests."
-    },
-    {
-      "type": "Identification",
-      "question": "Question text here — what is ___?",
-      "answer": "Short answer (1–5 words)",
-      "explanation": "2–3 sentence explanation."
-    }
-  ]
-}
-
-RULES:
-- Glossary: Include 5–10 of the most important terms. Each definition must be clear and student-friendly.
-- Case Studies: Include 2–3 realistic scenarios that apply the material to real life. Make them engaging.
-- Summary: MUST be 150–300 words, written in plain English paragraphs separated by newlines. DO NOT use bullet points in the summary.
-- Questions: Generate exactly ${settings.count} questions. Type distribution based on setting: ${settings.type === "Mixed" ? "roughly half MCQ, half Identification" : settings.type === "MCQ" ? "all MCQ" : "all Identification"}.
-- All MCQ must have exactly 4 options.
-- Difficulty ${settings.difficulty}: ${settings.difficulty === "Easy" ? "basic recall and definitions" : settings.difficulty === "Medium" ? "application and understanding" : "analysis, synthesis, and evaluation"}.
-- Return ONLY valid JSON, no markdown, no backticks, no extra text.`;
+    const questionCount = parseInt(settings.count || "10");
 
     const API_KEY = process.env.OPENROUTER_API_KEY || "";
     if (!API_KEY) {
       return NextResponse.json({ error: "API key not configured" }, { status: 500 });
     }
 
-    const maxTokens = Math.min(Math.max(4000, parseInt(settings.count || "10") * 200), 16000);
+    const prompt = `You are an expert study assistant and educator. Analyze the following study material and generate a comprehensive study kit in JSON format.
+
+STUDY MATERIAL:
+${content}
+
+SETTINGS:
+- Quiz Type: ${settings.type}
+- Difficulty: ${settings.difficulty}
+- Number of Questions: ${questionCount}
+
+Generate a JSON object with EXACTLY this structure:
+
+{
+  "summary": "A comprehensive, student-friendly explanation of ALL the key topics in the material. This should be like a mini-lecture that helps students UNDERSTAND the material deeply. Write 400–600 words MINIMUM. Cover every major topic. Explain concepts clearly using simple language. Use short paragraphs (3-4 sentences each). Explain WHY things matter, give examples, and connect ideas together. A student reading ONLY this summary should be able to understand the core material well enough to answer questions about it.",
+
+  "objectives": [
+    "After studying this material, students will be able to...",
+    "Include 5–8 specific, measurable learning objectives that cover all key topics"
+  ],
+
+  "key_concepts": [
+    "List 8–15 key concepts/terms from the material"
+  ],
+
+  "glossary": [
+    {
+      "term": "Term Name",
+      "definition": "A clear definition in 1–3 sentences. Include an example or analogy when helpful."
+    }
+  ],
+
+  "case_studies": [
+    {
+      "title": "Short descriptive title",
+      "scenario": "A realistic real-world scenario (4–6 sentences) that applies concepts from the material. Make it engaging and relatable.",
+      "lesson": "What this teaches — connect it to 2–3 key concepts."
+    }
+  ],
+
+  "questions": [
+    {
+      "type": "MCQ",
+      "question": "Clear question text?",
+      "options": ["Option A", "Option B", "Option C", "Option D"],
+      "answer": "The correct option exactly as written",
+      "explanation": "2–3 sentence explanation of why this is correct."
+    },
+    {
+      "type": "Identification",
+      "question": "What is ___?",
+      "answer": "Short answer (1–5 words)",
+      "explanation": "2–3 sentence explanation."
+    }
+  ]
+}
+
+CRITICAL RULES:
+- Summary: MUST be 400–600 words minimum. Cover ALL major topics. Plain English paragraphs, NO bullet points. Make it educational — students should learn from reading it.
+- Glossary: 8–15 terms with clear, student-friendly definitions.
+- Case Studies: 3–4 realistic scenarios.
+- Objectives: 5–8 clear learning objectives.
+- Key Concepts: 8–15 concepts.
+
+QUESTION RULES (VERY IMPORTANT):
+- You MUST generate EXACTLY ${questionCount} questions. Not fewer, not more. COUNT THEM.
+- I repeat: the "questions" array MUST contain exactly ${questionCount} items.
+- Type: ${settings.type === "Mixed" ? "roughly half MCQ and half Identification" : settings.type === "MCQ" ? "ALL questions must be MCQ" : "ALL questions must be Identification"}.
+- Every MCQ must have exactly 4 options with one correct answer.
+- Difficulty "${settings.difficulty}": ${settings.difficulty === "Easy" ? "basic recall, definitions, and simple facts" : settings.difficulty === "Medium" ? "application, understanding, and comparing concepts" : "analysis, synthesis, evaluation, and critical thinking"}.
+- Make questions diverse — cover different parts of the material. Do not repeat similar questions.
+- Each question must be unique and test a different concept or angle.
+
+Return ONLY valid JSON. No markdown, no backticks, no explanation outside the JSON.`;
+
+    // Calculate tokens needed: ~150 tokens per question + ~2000 for study kit content
+    const maxTokens = Math.min(2000 + questionCount * 150, 16000);
 
     // Race all models in parallel — first successful response wins
     const result = await Promise.any(
-      MODELS.map((model) => tryModel(model, prompt, API_KEY, maxTokens, 50000))
+      MODELS.map((model) => callLLM(model, prompt, API_KEY, maxTokens, 55000))
     ).catch(() => null);
 
-    if (result) {
-      return NextResponse.json(result);
+    if (!result) {
+      return NextResponse.json(
+        { error: "All models are busy. Please try again in a moment." },
+        { status: 500 }
+      );
     }
 
-    return NextResponse.json(
-      { error: "All models are busy. Please try again in a moment." },
-      { status: 500 }
-    );
+    const parsed = extractJSON(result);
+
+    if (!parsed.questions || !Array.isArray(parsed.questions)) {
+      return NextResponse.json(
+        { error: "Invalid response from AI. Please try again." },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json(parsed);
   } catch (error: any) {
     console.error("Generate error:", error);
     return NextResponse.json(
