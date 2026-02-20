@@ -169,7 +169,7 @@ export async function POST(req: NextRequest) {
       text: text.trim().slice(0, 6000),
       chars: text.length,
       ext,
-      storagePath
+      fileName
     });
 
   } catch (error: any) {
