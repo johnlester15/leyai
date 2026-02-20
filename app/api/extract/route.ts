@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
     const contentType = req.headers.get("content-type") || "";
 
     if (contentType.includes("multipart/form-data")) {
-      // Direct file upload via FormData//11//2121
+      // Direct file upload via FormData
       const formData = await req.formData();
       const file = formData.get("file") as File;
       const formFileName = formData.get("fileName") as string;
@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
       if (!file) {
         return NextResponse.json({ error: "No file provided." }, { status: 400 });
       }
-//test//
+
       fileName = formFileName || file.name || "";
       buffer = Buffer.from(await file.arrayBuffer());
       ext = fileName.split(".").pop()?.toLowerCase() || "";
