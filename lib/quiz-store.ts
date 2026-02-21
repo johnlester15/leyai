@@ -38,10 +38,14 @@ export interface QuizState {
 
 export const QUIZ_STORE_KEY = "studygen_quiz_data";
 export const QUIZ_STATE_KEY = "studygen_quiz_state";
+export const QUIZ_CONTENT_KEY = "studygen_quiz_content";
+export const QUIZ_SETTINGS_KEY = "studygen_quiz_settings";
 
 // Quiz Data Management
 export function saveQuizData(data: QuizData): void {
   if (typeof window !== "undefined") {
+    // Clear any previous quiz state (answers/score) when saving new quiz data
+    sessionStorage.removeItem(QUIZ_STATE_KEY);
     sessionStorage.setItem(QUIZ_STORE_KEY, JSON.stringify(data));
   }
 }
@@ -83,9 +87,40 @@ export function clearQuizState(): void {
   }
 }
 
+export function saveQuizContent(content: string): void {
+  if (typeof window !== "undefined") {
+    sessionStorage.setItem(QUIZ_CONTENT_KEY, content);
+  }
+}
+
+export function loadQuizContent(): string | null {
+  if (typeof window !== "undefined") {
+    return sessionStorage.getItem(QUIZ_CONTENT_KEY);
+  }
+  return null;
+}
+
+export function saveQuizSettings(settings: Record<string, string>): void {
+  if (typeof window !== "undefined") {
+    sessionStorage.setItem(QUIZ_SETTINGS_KEY, JSON.stringify(settings));
+  }
+}
+
+export function loadQuizSettings(): Record<string, string> | null {
+  if (typeof window !== "undefined") {
+    try {
+      const raw = sessionStorage.getItem(QUIZ_SETTINGS_KEY);
+      if (raw) return JSON.parse(raw);
+    } catch { return null; }
+  }
+  return null;
+}
+
 export function clearAllQuizData(): void {
   if (typeof window !== "undefined") {
     sessionStorage.removeItem(QUIZ_STORE_KEY);
     sessionStorage.removeItem(QUIZ_STATE_KEY);
+    sessionStorage.removeItem(QUIZ_CONTENT_KEY);
+    sessionStorage.removeItem(QUIZ_SETTINGS_KEY);
   }
 }

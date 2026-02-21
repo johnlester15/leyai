@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { saveQuizData, loadQuizData, QuizData } from "@/lib/quiz-store";
+import { saveQuizData, loadQuizData, clearAllQuizData, saveQuizContent, saveQuizSettings, QuizData } from "@/lib/quiz-store";
 import { Settings, ChatMessage } from "@/app/lib/types";
 import { supabase } from "@/lib/supabase-client";
 import Navbar from "@/app/components/Navbar";
@@ -40,24 +40,61 @@ export default function StudyGenAI() {
   const resultsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    // Disable browser's automatic scroll restoration so page always starts at top
+    if ("scrollRestoration" in history) {
+      history.scrollRestoration = "manual";
+    }
+    window.scrollTo(0, 0);
+
     // Show modals only once per session
     const hasSeenModals = sessionStorage.getItem("hasSeenLeyaniModals");
     if (!hasSeenModals) {
       setShowPrivacyModal(true);
       sessionStorage.setItem("hasSeenLeyaniModals", "true");
     }
+
+    // Restore file info, extracted text, and pasted text from session
+    const savedFileName = sessionStorage.getItem("studygen_file_name");
+    if (savedFileName) {
+      // Create a lightweight placeholder File so the UI shows the name
+      setFile(new File([], savedFileName));
+    }
+    const savedExtracted = sessionStorage.getItem("studygen_extracted_text");
+    if (savedExtracted) setExtractedText(savedExtracted);
+    const savedPasted = sessionStorage.getItem("studygen_pasted_text");
+    if (savedPasted) {
+      setPastedText(savedPasted);
+      setUseTextMode(true);
+    }
+
     // Load previously generated quiz data if available
     const savedQuizData = loadQuizData();
     if (savedQuizData) {
       setQuizData(savedQuizData);
       setShowResults(true);
     }
+
+    // Force scroll to top after all state restoration and re-renders
+    // Multiple calls at different timings to beat browser scroll restoration
+    requestAnimationFrame(() => window.scrollTo(0, 0));
+    setTimeout(() => window.scrollTo(0, 0), 0);
+    setTimeout(() => window.scrollTo(0, 0), 50);
+    setTimeout(() => window.scrollTo(0, 0), 150);
   }, []);
 
   const handleFileUpload = async (uploadedFile: File) => {
     setFile(uploadedFile);
     setExtractedText("");
     setError("");
+    // Clear old quiz data so stale results never show
+    clearAllQuizData();
+    // Clear previous file session data (will be replaced after extraction)
+    sessionStorage.removeItem("studygen_extracted_text");
+    sessionStorage.removeItem("studygen_pasted_text");
+    sessionStorage.setItem("studygen_file_name", uploadedFile.name);
+    setQuizData(null);
+    setShowResults(false);
+    setChatMessages([]);
 
     const ext = uploadedFile.name.split(".").pop()?.toLowerCase();
 
@@ -65,6 +102,8 @@ export default function StudyGenAI() {
     if (ext === "txt") {
       const text = await uploadedFile.text();
       setExtractedText(text);
+      sessionStorage.setItem("studygen_extracted_text", text);
+      sessionStorage.setItem("studygen_file_name", uploadedFile.name);
       return;
     }
 
@@ -104,6 +143,8 @@ export default function StudyGenAI() {
 
       if (data?.text) {
         setExtractedText(data.text);
+        sessionStorage.setItem("studygen_extracted_text", data.text);
+        sessionStorage.setItem("studygen_file_name", uploadedFile.name);
       } else {
         throw new Error("Failed to extract text from file");
       }
@@ -126,6 +167,7 @@ export default function StudyGenAI() {
     setQuizData(null);
     setShowResults(false);
     setChatMessages([]);
+    clearAllQuizData();
 
     try {
       const response = await fetch("/api/generate", {
@@ -144,7 +186,6 @@ export default function StudyGenAI() {
 
       setQuizData(data);
       setShowResults(true);
-      setTimeout(() => resultsRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
     } catch (err: any) {
       setError(err.message || "Failed to generate. Please try again.");
     } finally {
@@ -154,7 +195,10 @@ export default function StudyGenAI() {
 
   const handleGoToQuiz = () => {
     if (!quizData) return;
+    const content = useTextMode ? pastedText : extractedText;
     saveQuizData(quizData);
+    saveQuizContent(content);
+    saveQuizSettings(settings as unknown as Record<string, string>);
     router.push("/quiz");
   };
 
@@ -189,12 +233,21 @@ export default function StudyGenAI() {
 
   const canGenerate = !isExtracting && !isGenerating && (useTextMode ? pastedText.trim().length > 10 : extractedText.length > 10);
 
+  const handlePastedTextChange = (text: string) => {
+    setPastedText(text);
+    if (text.trim()) {
+      sessionStorage.setItem("studygen_pasted_text", text);
+    } else {
+      sessionStorage.removeItem("studygen_pasted_text");
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#1c1c1c] text-[#ededed] font-sans selection:bg-[#3ecf8e]/30 tracking-tight">
       <Navbar />
 
       <main className="max-w-7xl mx-auto px-6 py-8 lg:py-16">
-        <HeroSection />
+        <HeroSection topic={quizData ? (file?.name?.replace(/\.[^.]+$/, "") || quizData.key_concepts?.[0] || undefined) : undefined} />
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
 
@@ -205,7 +258,7 @@ export default function StudyGenAI() {
               setUseTextMode={setUseTextMode}
               file={file}
               pastedText={pastedText}
-              setPastedText={setPastedText}
+              setPastedText={handlePastedTextChange}
               extractedText={extractedText}
               isExtracting={isExtracting}
               isDragging={isDragging}

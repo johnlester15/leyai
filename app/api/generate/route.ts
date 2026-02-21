@@ -143,7 +143,7 @@ Return this JSON structure:
   "glossary": [{"term":"Name","definition":"Clear 1-3 sentence definition"}],
   "case_studies": [{"title":"Title","scenario":"4-6 sentence real scenario","lesson":"Connection to concepts"}],
   "questions": [
-    {"type":"MCQ","question":"?","options":["A","B","C","D"],"answer":"correct option","explanation":"why"},
+    {"type":"MCQ","question":"?","options":["Option text 1","Option text 2","Option text 3","Option text 4"],"answer":"Option text 1","explanation":"why"},
     {"type":"Identification","question":"?","answer":"1-5 words","explanation":"why"}
   ]
 }
@@ -155,6 +155,8 @@ RULES:
 - EXACTLY ${questionCount} questions
 - Type: ${settings.type === "Mixed" ? "half MCQ, half Identification" : settings.type === "MCQ" ? "all MCQ" : "all Identification"}
 - MCQ: 4 options each. Difficulty: ${settings.difficulty}
+- MCQ OPTIONS MUST NOT have letter prefixes like "A." or "B." — just the plain text
+- MCQ ANSWER MUST be the EXACT full text of the correct option (NOT a letter like A/B/C/D)
 - All questions must be different, covering different concepts
 - ONLY valid JSON, no markdown`;
 }
@@ -169,12 +171,14 @@ EXISTING (do not repeat):
 ${existing}
 
 Return ONLY a JSON array:
-[{"type":"${settings.type === "Identification" ? "Identification" : "MCQ"}","question":"?","options":["A","B","C","D"],"answer":"correct","explanation":"why"}]
+[{"type":"${settings.type === "Identification" ? "Identification" : "MCQ"}","question":"?","options":["Option text 1","Option text 2","Option text 3","Option text 4"],"answer":"Option text 1","explanation":"why"}]
 
 RULES:
 - EXACTLY ${count} questions, count carefully
 - Type: ${settings.type === "Mixed" ? "mix MCQ and Identification" : settings.type}
 - MCQ: 4 options. Identification: no options field, answer is 1-5 words
+- MCQ OPTIONS MUST NOT have letter prefixes like "A." or "B." — just the plain text
+- MCQ ANSWER MUST be the EXACT full text of the correct option (NOT a letter like A/B/C/D)
 - Difficulty: ${settings.difficulty}
 - Cover DIFFERENT topics than existing questions
 - ONLY valid JSON array, nothing else`;
@@ -212,25 +216,59 @@ export async function POST(req: NextRequest) {
 
     let allQuestions = studyKit.questions as any[];
 
-    // Step 2: If GPT gave fewer than requested, fetch the rest
-    if (allQuestions.length < requestedCount) {
+    // Step 2: If AI gave fewer than requested, fetch the rest (with retries)
+    const MAX_RETRIES = 3;
+    let retries = 0;
+    while (allQuestions.length < requestedCount && retries < MAX_RETRIES) {
       const remaining = requestedCount - allQuestions.length;
       const existingSummary = allQuestions.map((q: any, i: number) => `${i + 1}. ${q.question}`).join("\n");
       const extraPrompt = buildQuestionsOnlyPrompt(content, settings, remaining, existingSummary);
 
       try {
-        const raw = await callLLM(extraPrompt, API_KEY, Math.min(remaining * 250, 4000));
+        const raw = await callLLM(extraPrompt, API_KEY, Math.min(remaining * 300, 5000));
         const extraQuestions = parseJSONArray(raw);
         if (Array.isArray(extraQuestions) && extraQuestions.length > 0) {
           allQuestions = allQuestions.concat(extraQuestions);
+        } else {
+          retries++;
         }
       } catch {
-        // Return what we have
+        retries++;
       }
     }
 
     // Enforce exact count
     studyKit.questions = allQuestions.slice(0, requestedCount);
+
+    // Normalize questions: strip letter prefixes from options, fix answer mismatches
+    studyKit.questions = (studyKit.questions as any[]).map((q: any) => {
+      if (q.type === "MCQ" && Array.isArray(q.options)) {
+        // Strip letter prefixes like "A. ", "B) ", "a. " from options
+        const letterPrefixRegex = /^[A-Da-d][.):\-]\s*/;
+        q.options = q.options.map((opt: string) => opt.replace(letterPrefixRegex, "").trim());
+
+        // If answer is a single letter (A/B/C/D), resolve it to the actual option text
+        const letterMatch = q.answer?.trim().match(/^([A-Da-d])\.?$/);
+        if (letterMatch) {
+          const idx = letterMatch[1].toUpperCase().charCodeAt(0) - 65; // A=0, B=1, C=2, D=3
+          if (idx >= 0 && idx < q.options.length) {
+            q.answer = q.options[idx];
+          }
+        } else if (q.answer) {
+          // Also strip letter prefix from the answer itself
+          q.answer = q.answer.replace(letterPrefixRegex, "").trim();
+        }
+
+        // Final safety: if answer doesn't match any option exactly, try case-insensitive match
+        if (q.answer && !q.options.includes(q.answer)) {
+          const match = q.options.find((opt: string) =>
+            opt.toLowerCase().trim() === q.answer.toLowerCase().trim()
+          );
+          if (match) q.answer = match;
+        }
+      }
+      return q;
+    });
 
     return NextResponse.json(studyKit);
   } catch (error: any) {

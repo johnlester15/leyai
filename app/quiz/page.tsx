@@ -5,9 +5,9 @@ import { useRouter } from "next/navigation";
 import {
   Trophy, RotateCcw, CheckCircle2, XCircle, Check,
   ArrowLeft, BrainCircuit, Loader2, AlertCircle,
-  PartyPopper, ThumbsUp, BookOpen, Dumbbell
+  PartyPopper, ThumbsUp, BookOpen, Dumbbell, RefreshCw
 } from "lucide-react";
-import { loadQuizData, loadQuizState, saveQuizState, clearQuizState, QuizData } from "@/lib/quiz-store";
+import { loadQuizData, loadQuizState, saveQuizState, saveQuizData, clearQuizState, loadQuizContent, loadQuizSettings, QuizData } from "@/lib/quiz-store";
 
 export default function QuizPage() {
   const router = useRouter();
@@ -18,6 +18,12 @@ export default function QuizPage() {
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [score, setScore] = useState(0);
   const [error, setError] = useState("");
+
+  const goHome = () => {
+    window.scrollTo(0, 0);
+    router.push("/");
+  };
+  const [isRegenerating, setIsRegenerating] = useState(false);
   const questionsRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   useEffect(() => {
@@ -50,6 +56,38 @@ export default function QuizPage() {
     }
   }, [userAnswers, fillInputs, isSubmitted, score, quizData]);
 
+  // Robust answer comparison: handles letter-only answers, prefix mismatches, case differences
+  const isAnswerCorrect = (question: any, questionIndex: number): boolean => {
+    const uAns = question.type === "Identification"
+      ? (fillInputs[questionIndex] || "")
+      : (userAnswers[questionIndex] || "");
+    if (!uAns) return false;
+
+    const uTrim = uAns.toLowerCase().trim();
+    const aTrim = question.answer?.toLowerCase().trim() || "";
+
+    // Direct match
+    if (uTrim === aTrim) return true;
+
+    // For MCQ: if the stored answer is a letter (A/B/C/D), resolve to option index
+    if (question.type === "MCQ" && Array.isArray(question.options)) {
+      const letterMatch = question.answer?.trim().match(/^([A-Da-d])\.?$/);
+      if (letterMatch) {
+        const idx = letterMatch[1].toUpperCase().charCodeAt(0) - 65;
+        if (idx >= 0 && idx < question.options.length) {
+          if (uTrim === question.options[idx].toLowerCase().trim()) return true;
+        }
+      }
+      // Also check if user's answer matches correct option after stripping letter prefixes
+      const prefixRegex = /^[A-Da-d][.):\-]\s*/;
+      const cleanAnswer = aTrim.replace(prefixRegex, "");
+      const cleanUser = uTrim.replace(prefixRegex, "");
+      if (cleanAnswer === cleanUser) return true;
+    }
+
+    return false;
+  };
+
   const handleSelectAnswer = (qi: number, opt: string) => {
     if (isSubmitted) return;
     setUserAnswers(prev => ({ ...prev, [qi]: opt }));
@@ -77,8 +115,7 @@ export default function QuizPage() {
 
     let finalScore = 0;
     quizData?.questions.forEach((q, i) => {
-      const uAns = q.type === "Identification" ? (fillInputs[i] || "") : (userAnswers[i] || "");
-      if (uAns.toLowerCase().trim() === q.answer.toLowerCase().trim()) finalScore++;
+      if (isAnswerCorrect(q, i)) finalScore++;
     });
     setScore(finalScore);
     setIsSubmitted(true);
@@ -92,6 +129,50 @@ export default function QuizPage() {
     setIsSubmitted(false);
     clearQuizState();
     window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const handleNewQuestions = async () => {
+    const content = loadQuizContent();
+    const settings = loadQuizSettings();
+    if (!content || !settings) {
+      setError("Original lesson data not found. Please go back and generate again.");
+      setTimeout(() => setError(""), 4000);
+      return;
+    }
+
+    setIsRegenerating(true);
+    setError("");
+
+    try {
+      const response = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content, settings }),
+      });
+
+      let data;
+      try {
+        data = await response.json();
+      } catch {
+        throw new Error(`Server error: ${response.status}. Try again.`);
+      }
+      if (!response.ok || data.error) throw new Error(data.error || "Generation failed");
+
+      // Update quiz data with new questions, keep same lesson info
+      setQuizData(data);
+      saveQuizData(data);
+      setUserAnswers({});
+      setFillInputs({});
+      setScore(0);
+      setIsSubmitted(false);
+      clearQuizState();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (err: any) {
+      setError(err.message || "Failed to generate new questions. Please try again.");
+      setTimeout(() => setError(""), 4000);
+    } finally {
+      setIsRegenerating(false);
+    }
   };
 
   const totalQuestions = quizData?.questions.length || 0;
@@ -112,7 +193,7 @@ export default function QuizPage() {
         <AlertCircle size={48} className="text-[#555] mb-4" />
         <h2 className="text-lg sm:text-xl font-bold mb-2">No Quiz Data Found</h2>
         <p className="text-xs sm:text-sm text-[#555] mb-6">Please go back and generate a study kit first.</p>
-        <button onClick={() => router.push("/")}
+        <button onClick={goHome}
           className="flex items-center justify-center gap-2 px-4 sm:px-6 py-2 sm:py-3 bg-[#3ecf8e] text-black font-bold rounded-full hover:bg-[#34b27b] transition-all text-xs sm:text-sm">
           <ArrowLeft size={16} /> Back to Study Kit
         </button>
@@ -151,7 +232,7 @@ export default function QuizPage() {
           )}
 
           {/* Back Button - Right (Desktop only) */}
-          <button onClick={() => router.push("/")}
+          <button onClick={goHome}
             className="hidden md:flex items-center gap-2 px-4 py-2 bg-[#2e2e2e] hover:bg-[#3e3e3e] text-[#ededed] rounded-lg text-xs font-bold transition-all border border-[#3e3e3e]">
             <ArrowLeft size={14} /> Home
           </button>
@@ -182,7 +263,12 @@ export default function QuizPage() {
                 className="flex items-center justify-center gap-2 px-4 py-2 bg-[#2e2e2e] hover:bg-[#3e3e3e] rounded-lg text-xs font-bold border border-[#3e3e3e] transition-all whitespace-nowrap">
                 <RotateCcw size={14} /> Retake
               </button>
-              <button onClick={() => router.push("/")}
+              <button onClick={handleNewQuestions} disabled={isRegenerating}
+                className="flex items-center justify-center gap-2 px-4 py-2 bg-[#2e2e2e] hover:bg-[#3e3e3e] rounded-lg text-xs font-bold border border-[#3e3e3e] transition-all whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed">
+                {isRegenerating ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                {isRegenerating ? "Generating..." : "New Questions"}
+              </button>
+              <button onClick={goHome}
                 className="flex items-center justify-center gap-2 px-4 py-2 bg-[#3ecf8e]/10 hover:bg-[#3ecf8e]/20 rounded-lg text-xs font-bold border border-[#3ecf8e]/30 text-[#3ecf8e] transition-all whitespace-nowrap">
                 <ArrowLeft size={14} /> Study More
               </button>
@@ -194,7 +280,7 @@ export default function QuizPage() {
         {!isSubmitted && (
           <div className="mb-6 sm:mb-8">
             {/* Back Button - Mobile only */}
-            <button onClick={() => router.push("/")}
+            <button onClick={goHome}
               className="md:hidden flex items-center gap-2 px-4 py-2 mb-4 bg-[#2e2e2e] hover:bg-[#3e3e3e] text-[#ededed] rounded-lg text-xs font-bold transition-all border border-[#3e3e3e]">
               <ArrowLeft size={14} /> Home
             </button>
@@ -215,7 +301,7 @@ export default function QuizPage() {
         <div className="space-y-4 sm:space-y-5">
           {quizData.questions.map((q, i) => {
             const uAns = q.type === "Identification" ? (fillInputs[i] || "") : (userAnswers[i] || "");
-            const isCorrect = uAns.toLowerCase().trim() === q.answer.toLowerCase().trim();
+            const isCorrect = isAnswerCorrect(q, i);
 
             return (
               <div ref={(el) => { questionsRefs.current[i] = el; }} key={i} className={`bg-[#232323] border rounded-2xl p-4 sm:p-6 transition-all duration-300
@@ -246,13 +332,26 @@ export default function QuizPage() {
                 {q.type === "MCQ" && (
                   <div className="grid gap-2 sm:gap-2.5 mb-4">
                     {q.options?.map((opt, idx) => {
+                      // Determine if this option is the correct answer
+                      const isCorrectOption = (() => {
+                        if (opt === q.answer) return true;
+                        if (opt.toLowerCase().trim() === q.answer?.toLowerCase().trim()) return true;
+                        // Handle letter-only answer (A/B/C/D)
+                        const letterMatch = q.answer?.trim().match(/^([A-Da-d])\.?$/);
+                        if (letterMatch) {
+                          const ansIdx = letterMatch[1].toUpperCase().charCodeAt(0) - 65;
+                          return idx === ansIdx;
+                        }
+                        return false;
+                      })();
+
                       let cls = "w-full p-3 sm:p-4 border rounded-xl text-left text-sm transition-all ";
                       if (!isSubmitted) {
                         cls += userAnswers[i] === opt
                           ? 'bg-[#3ecf8e]/10 border-[#3ecf8e] text-[#3ecf8e] font-bold'
                           : 'bg-[#1c1c1c] border-[#2e2e2e] hover:border-[#3ecf8e]/40 cursor-pointer';
                       } else {
-                        if (opt === q.answer) cls += 'border-[#3ecf8e] bg-[#3ecf8e]/10 text-[#3ecf8e] font-bold';
+                        if (isCorrectOption) cls += 'border-[#3ecf8e] bg-[#3ecf8e]/10 text-[#3ecf8e] font-bold';
                         else if (userAnswers[i] === opt) cls += 'border-red-400 bg-red-400/10 text-red-300';
                         else cls += 'bg-[#1c1c1c] border-[#2e2e2e] opacity-40';
                       }
