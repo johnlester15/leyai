@@ -3,21 +3,20 @@ import { NextRequest, NextResponse } from "next/server";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-// ⚡ Ordered by speed: fastest first — Promise.any picks the winner!
 const FREE_MODELS = [
-  "stepfun/step-3.5-flash:free",                   // 🥇 ultra fast
-  "z-ai/glm-4.5-air:free",                         // 🥈 fast
-  "mistralai/mistral-small-3.1-24b-instruct:free", // 🥉 fast + great JSON
-  "google/gemini-2.0-flash-exp:free",              // ⚡ fast + 1M context
-  "nvidia/nemotron-3-nano-30b-a3b:free",           // ⚡ fast nano
-  "meta-llama/llama-3.3-70b-instruct:free",        // reliable quality
-  "arcee-ai/trinity-large-preview:free",           // solid fallback
-  "openai/gpt-oss-120b:free",                      // OpenAI free 120B
-  "qwen/qwen3-235b-a22b-thinking:free",            // 🧠 best reasoning (slower)
+                                 // 🤖 auto picks best!
+  "qwen/qwen3-235b-a22b-thinking:free",           // 🥇 best reasoning
+  "openai/gpt-oss-120b:free",                     // 🥈 OpenAI free 120B
+  "google/gemini-2.0-flash-exp:free",             // 🥉 1M context
+  "meta-llama/llama-3.3-70b-instruct:free",       // reliable
+  "mistralai/mistral-small-3.1-24b-instruct:free", // great JSON
+  "stepfun/step-3.5-flash:free",                  // ultra fast
+  "z-ai/glm-4.5-air:free",                        // fast
+  "arcee-ai/trinity-large-preview:free",          // your OG
+  "nvidia/nemotron-3-nano-30b-a3b:free",          // fallback
 ];
 
-// 🔁 Fallback: fastest free model if all above fail
-const FALLBACK_MODEL = "stepfun/step-3.5-flash:free";
+const GPT = "openai/gpt-3.5-turbo";
 
 async function callModel(
   model: string,
@@ -66,9 +65,9 @@ async function callModel(
   }
 }
 
-// ⚡ Race ALL free models simultaneously — fastest wins!
-// Simple = race fast models first (top 5)
-// Hard/Large = race all models at once
+// Race ALL models simultaneously — fastest wins!
+// Small/easy = free only (save GPT credits)
+// Large/hard = free + GPT race together
 async function callLLM(
   prompt: string,
   apiKey: string,
@@ -78,19 +77,23 @@ async function callLLM(
 ): Promise<string> {
   const isSimple = contentLength < 3000 && difficulty !== "Hard";
 
-  // For simple tasks, only race the top 5 fastest models
-  const modelsToRace = isSimple ? FREE_MODELS.slice(0, 5) : FREE_MODELS;
-
-  try {
-    return await Promise.any(
-      modelsToRace.map((model) => callModel(model, prompt, apiKey, maxTokens, 20000))
-    );
-  } catch {
-    // All raced models failed — try fallback
+  if (isSimple) {
     try {
-      return await callModel(FALLBACK_MODEL, prompt, apiKey, maxTokens, 25000);
+      return await Promise.any(
+        FREE_MODELS.map((model) => callModel(model, prompt, apiKey, maxTokens, 20000))
+      );
     } catch {
-      throw new Error("All models failed. Please try again.");
+      // All free failed — fallback to GPT
+      return await callModel(GPT, prompt, apiKey, maxTokens, 20000);
+    }
+  } else {
+    try {
+      return await Promise.any([
+        ...FREE_MODELS.map((model) => callModel(model, prompt, apiKey, maxTokens, 20000)),
+        callModel(GPT, prompt, apiKey, maxTokens, 20000),
+      ]);
+    } catch {
+      throw new Error("All models failed");
     }
   }
 }
