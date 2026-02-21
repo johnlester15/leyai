@@ -14,9 +14,11 @@ export interface Settings {
   count: string;
 }
 
+export type InputMode = "file" | "text";
+
 export interface InputSectionProps {
-  useTextMode: boolean;
-  setUseTextMode: (value: boolean) => void;
+  inputMode: InputMode;
+  setInputMode: (mode: InputMode) => void;
   file: File | null;
   pastedText: string;
   setPastedText: (text: string) => void;
@@ -35,7 +37,7 @@ export interface SettingsProps {
   isExtracting: boolean;
   extractedText: string;
   pastedText: string;
-  useTextMode: boolean;
+  inputMode: InputMode;
   handleGenerate: () => Promise<void>;
 }
 

@@ -27,7 +27,10 @@ export async function POST(req: Request) {
         content: h.text,
       }));
 
-    const systemPrompt = `You are a helpful study assistant AI tutor.
+    const systemPrompt = `You are LEYANI AI, a helpful study assistant created by John Lester D. Defensor. 
+LEYANI was named after his girlfriend Leannie, who is his inspiration for building this app.
+If anyone asks who made you or who created you, always say: "I was created by John Lester D. Defensor."
+If anyone asks what LEYANI means or stands for, explain it was named after his girlfriend Leannie as a tribute to her.
 ${context ? `Context about the lesson: ${context}` : ""}
 Answer questions clearly and helpfully. Keep responses concise (2-4 sentences).
 Do NOT use markdown formatting like ** or * in your responses. Plain text only.`;
@@ -42,8 +45,8 @@ Do NOT use markdown formatting like ** or * in your responses. Plain text only.`
           headers: {
             "Authorization": `Bearer ${API_KEY}`,
             "Content-Type": "application/json",
-            "HTTP-Referer": "http://localhost:3000",
-            "X-Title": "StudyGen AI",
+            "HTTP-Referer": "https://leyai.vercel.app",
+            "X-Title": "LEYANI AI",
           },
           body: JSON.stringify({
             model,
@@ -80,10 +83,18 @@ Do NOT use markdown formatting like ** or * in your responses. Plain text only.`
       }
     }
 
-    // ✅ Fallback: Simple rule-based response
+    // Fallback: Simple rule-based response
     const lowerPrompt = prompt.toLowerCase();
-    let fallback = "That's a great question! Based on what we've covered, think about how the key concepts relate to your learning objectives.";
 
+    // Identity questions fallback
+    if (lowerPrompt.includes("who made you") || lowerPrompt.includes("who created you") || lowerPrompt.includes("kinsa nag buhat")) {
+      return NextResponse.json({ reply: "I was created by John Lester D. Defensor." });
+    }
+    if (lowerPrompt.includes("leyani") || lowerPrompt.includes("what does your name mean")) {
+      return NextResponse.json({ reply: "LEYANI was named after the creator's girlfriend, Leannie, who inspired the development of this app." });
+    }
+
+    let fallback = "That's a great question! Based on what we've covered, think about how the key concepts relate to your learning objectives.";
     if (lowerPrompt.includes("why")) {
       fallback = "Understanding the 'why' is crucial for deep learning. The key concepts are foundational because they appear across multiple topics and applications.";
     } else if (lowerPrompt.includes("how")) {

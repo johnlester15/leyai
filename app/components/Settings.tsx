@@ -9,10 +9,12 @@ export default function Settings({
   isExtracting,
   extractedText,
   pastedText,
-  useTextMode,
+  inputMode,
   handleGenerate,
 }: SettingsProps) {
-  const canGenerate = !isExtracting && !isGenerating && (useTextMode ? pastedText.trim().length > 10 : extractedText.length > 10);
+  const canGenerate = !isExtracting && !isGenerating && (
+    inputMode === "text" ? pastedText.trim().length > 10 : extractedText.length > 10
+  );
 
   return (
     <section className="bg-[#232323] border border-[#2e2e2e] rounded-2xl p-6 shadow-2xl hover:shadow-[0_8px_32px_rgba(62,207,142,0.08)] transition-shadow duration-300">

@@ -2,9 +2,9 @@ import { Upload, CheckCircle2, FileType, PresentationIcon, FileText, AlignLeft, 
 import { InputSectionProps } from "@/app/lib/types";
 
 export default function InputSection({
-  useTextMode,
-  setUseTextMode,//dsadsad
-  file,//dsadsadsad
+  inputMode,
+  setInputMode,
+  file,
   pastedText,
   setPastedText,
   extractedText,
@@ -16,16 +16,16 @@ export default function InputSection({
   return (
     <section className="bg-[#232323] border border-[#2e2e2e] rounded-2xl overflow-hidden shadow-2xl hover:shadow-[0_8px_32px_rgba(62,207,142,0.08)] transition-shadow duration-300">
       <div className="flex border-b border-[#2e2e2e] bg-[#1c1c1c]">
-        <button onClick={() => setUseTextMode(false)} className={`flex-1 py-3 text-xs font-bold transition-all ${!useTextMode ? 'bg-[#2e2e2e] text-[#3ecf8e]' : 'text-[#707070] hover:text-white'}`}>
+        <button onClick={() => setInputMode("file")} className={`flex-1 py-3 text-xs font-bold transition-all ${inputMode === "file" ? 'bg-[#2e2e2e] text-[#3ecf8e]' : 'text-[#707070] hover:text-white'}`}>
           Upload File
         </button>
-        <button onClick={() => setUseTextMode(true)} className={`flex-1 py-3 text-xs font-bold transition-all ${useTextMode ? 'bg-[#2e2e2e] text-[#3ecf8e]' : 'text-[#707070] hover:text-white'}`}>
+        <button onClick={() => setInputMode("text")} className={`flex-1 py-3 text-xs font-bold transition-all ${inputMode === "text" ? 'bg-[#2e2e2e] text-[#3ecf8e]' : 'text-[#707070] hover:text-white'}`}>
           Paste Notes
         </button>
       </div>
 
       <div className="p-6">
-        {!useTextMode ? (
+        {inputMode === "file" ? (
           <div>
             <div
               onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
@@ -78,14 +78,14 @@ export default function InputSection({
               </div>
             )}
           </div>
-        ) : (
+        ) : inputMode === "text" ? (
           <textarea
             className="w-full h-48 bg-[#1c1c1c] border border-[#2e2e2e] rounded-xl p-4 text-sm text-[#ededed] outline-none focus:border-[#3ecf8e] resize-none"
             placeholder="Paste your notes, lecture content, or study material here..."
             value={pastedText}
             onChange={(e) => setPastedText(e.target.value)}
           />
-        )}
+        ) : null}
       </div>
     </section>
   );

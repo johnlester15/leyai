@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { saveQuizData, loadQuizData, clearAllQuizData, saveQuizContent, saveQuizSettings, QuizData } from "@/lib/quiz-store";
-import { Settings, ChatMessage } from "@/app/lib/types";
+import { Settings, ChatMessage, InputMode } from "@/app/lib/types";
 import { supabase } from "@/lib/supabase-client";
 import Navbar from "@/app/components/Navbar";
 import HeroSection from "@/app/components/HeroSection";
@@ -18,7 +18,7 @@ export default function StudyGenAI() {
   const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
   const [pastedText, setPastedText] = useState("");
-  const [useTextMode, setUseTextMode] = useState(false);
+  const [inputMode, setInputMode] = useState<InputMode>("file");
   const [isGenerating, setIsGenerating] = useState(false);
   const [isExtracting, setIsExtracting] = useState(false);
   const [extractedText, setExtractedText] = useState("");
@@ -64,9 +64,8 @@ export default function StudyGenAI() {
     const savedPasted = sessionStorage.getItem("studygen_pasted_text");
     if (savedPasted) {
       setPastedText(savedPasted);
-      setUseTextMode(true);
+      setInputMode("text");
     }
-
     // Load previously generated quiz data if available
     const savedQuizData = loadQuizData();
     if (savedQuizData) {
@@ -156,7 +155,7 @@ export default function StudyGenAI() {
   };
 
   const handleGenerate = async () => {
-    const content = useTextMode ? pastedText : extractedText;
+    const content = inputMode === "text" ? pastedText : extractedText;
     if (!content || content.trim().length < 10) {
       setError("Please upload a file or paste your notes first!");
       return;
@@ -195,7 +194,7 @@ export default function StudyGenAI() {
 
   const handleGoToQuiz = () => {
     if (!quizData) return;
-    const content = useTextMode ? pastedText : extractedText;
+    const content = inputMode === "text" ? pastedText : extractedText;
     saveQuizData(quizData);
     saveQuizContent(content);
     saveQuizSettings(settings as unknown as Record<string, string>);
@@ -231,7 +230,9 @@ export default function StudyGenAI() {
     }
   };
 
-  const canGenerate = !isExtracting && !isGenerating && (useTextMode ? pastedText.trim().length > 10 : extractedText.length > 10);
+  const canGenerate = !isExtracting && !isGenerating && (
+    inputMode === "text" ? pastedText.trim().length > 10 : extractedText.length > 10
+  );
 
   const handlePastedTextChange = (text: string) => {
     setPastedText(text);
@@ -254,8 +255,8 @@ export default function StudyGenAI() {
           {/* LEFT */}
           <div className="lg:col-span-5 space-y-6">
             <InputSection
-              useTextMode={useTextMode}
-              setUseTextMode={setUseTextMode}
+              inputMode={inputMode}
+              setInputMode={setInputMode}
               file={file}
               pastedText={pastedText}
               setPastedText={handlePastedTextChange}
@@ -274,7 +275,7 @@ export default function StudyGenAI() {
               isExtracting={isExtracting}
               extractedText={extractedText}
               pastedText={pastedText}
-              useTextMode={useTextMode}
+              inputMode={inputMode}
               handleGenerate={handleGenerate}
             />
           </div>
