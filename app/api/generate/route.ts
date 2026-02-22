@@ -4,19 +4,22 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const FREE_MODELS = [
-                                 // 🤖 auto picks best!
-  "qwen/qwen3-235b-a22b-thinking:free",           // 🥇 best reasoning
-  "openai/gpt-oss-120b:free",                     // 🥈 OpenAI free 120B
-  "google/gemini-2.0-flash-exp:free",             // 🥉 1M context
-  "meta-llama/llama-3.3-70b-instruct:free",       // reliable
+  "qwen/qwen3-235b-a22b-thinking:free",            // 🥇 best reasoning
+  "openai/gpt-oss-120b:free",                      // 🥈 OpenAI free 120B
+  "google/gemini-2.0-flash-exp:free",              // 🥉 1M context
+  "meta-llama/llama-3.3-70b-instruct:free",        // reliable
   "mistralai/mistral-small-3.1-24b-instruct:free", // great JSON
-  "stepfun/step-3.5-flash:free",                  // ultra fast
-  "z-ai/glm-4.5-air:free",                        // fast
-  "arcee-ai/trinity-large-preview:free",          // your OG
-  "nvidia/nemotron-3-nano-30b-a3b:free",          // fallback
+  "stepfun/step-3.5-flash:free",                   // ultra fast
+  "z-ai/glm-4.5-air:free",                         // fast
+  "arcee-ai/trinity-large-preview:free",           // your OG
+  "nvidia/nemotron-3-nano-30b-a3b:free",           // fallback
 ];
 
-const GPT = "openai/gpt-3.5-turbo";
+// 💎 Premium — replaces GPT-3.5-turbo (faster + smarter)
+const PREMIUM_MODELS = [
+  "google/gemini-2.5-flash-lite",  // 🥇 Ultra fast + cheap
+  "anthropic/claude-sonnet-4.6",   // 🥈 Smart + reliable
+];
 
 async function callModel(
   model: string,
@@ -65,9 +68,8 @@ async function callModel(
   }
 }
 
-// Race ALL models simultaneously — fastest wins!
-// Small/easy = free only (save GPT credits)
-// Large/hard = free + GPT race together
+// 🟢 GAAN → free models race (15s), kung fail → premium fallback
+// 🔴 BUG-AT → free + premium race together, fastest wins
 async function callLLM(
   prompt: string,
   apiKey: string,
@@ -80,20 +82,23 @@ async function callLLM(
   if (isSimple) {
     try {
       return await Promise.any(
-        FREE_MODELS.map((model) => callModel(model, prompt, apiKey, maxTokens, 20000))
+        FREE_MODELS.map((model) => callModel(model, prompt, apiKey, maxTokens, 15000))
       );
     } catch {
-      // All free failed — fallback to GPT
-      return await callModel(GPT, prompt, apiKey, maxTokens, 20000);
+      // Free failed → premium fallback
+      return await Promise.any(
+        PREMIUM_MODELS.map((model) => callModel(model, prompt, apiKey, maxTokens, 30000))
+      );
     }
   } else {
+    // Heavy task — race everyone, fastest wins!
     try {
       return await Promise.any([
-        ...FREE_MODELS.map((model) => callModel(model, prompt, apiKey, maxTokens, 20000)),
-        callModel(GPT, prompt, apiKey, maxTokens, 20000),
+        ...FREE_MODELS.map((model) => callModel(model, prompt, apiKey, maxTokens, 25000)),
+        ...PREMIUM_MODELS.map((model) => callModel(model, prompt, apiKey, maxTokens, 55000)),
       ]);
     } catch {
-      throw new Error("All models failed");
+      throw new Error("All models failed. Please try again.");
     }
   }
 }
@@ -182,6 +187,22 @@ function normalizeQuestions(questions: any[]): any[] {
   });
 }
 
+function getQuestionExample(type: string): string {
+  if (type === "MCQ") {
+    return `    {"type":"MCQ","question":"?","options":["Option 1","Option 2","Option 3","Option 4"],"answer":"Option 1","explanation":"why"}`;
+  } else if (type === "Identification") {
+    return `    {"type":"Identification","question":"?","answer":"1-5 words","explanation":"why"}`;
+  }
+  return `    {"type":"MCQ","question":"?","options":["Option 1","Option 2","Option 3","Option 4"],"answer":"Option 1","explanation":"why"},
+    {"type":"Identification","question":"?","answer":"1-5 words","explanation":"why"}`;
+}
+
+function getTypeRule(type: string): string {
+  if (type === "MCQ") return "ALL questions must be MCQ ONLY — do NOT generate any Identification questions!";
+  if (type === "Identification") return "ALL questions must be Identification ONLY — do NOT generate any MCQ questions!";
+  return "half MCQ, half Identification";
+}
+
 function buildStudyKitPrompt(content: string, settings: any, questionCount: number): string {
   return `You are an expert study assistant. Analyze this material and generate a study kit as JSON.
 
@@ -196,8 +217,7 @@ Return this EXACT JSON structure:
   "glossary": [{"term":"Name","definition":"Clear 1-3 sentence definition"}],
   "case_studies": [{"title":"Title","scenario":"4-6 sentence real scenario","lesson":"Connection to concepts"}],
   "questions": [
-    {"type":"MCQ","question":"?","options":["Option 1","Option 2","Option 3","Option 4"],"answer":"Option 1","explanation":"why"},
-    {"type":"Identification","question":"?","answer":"1-5 words","explanation":"why"}
+${getQuestionExample(settings.type)}
   ]
 }
 
@@ -206,10 +226,11 @@ STRICT RULES:
 - Glossary: 8-15 terms
 - Case Studies: 3-4 scenarios
 - EXACTLY ${questionCount} questions, no more no less
-- Type: ${settings.type === "Mixed" ? "half MCQ, half Identification" : settings.type === "MCQ" ? "all MCQ" : "all Identification"}
+- ⚠️ QUESTION TYPE: ${getTypeRule(settings.type)}
 - MCQ: exactly 4 options. Difficulty: ${settings.difficulty}
 - MCQ OPTIONS must NOT have letter prefixes like "A." or "B."
 - MCQ ANSWER must be the EXACT full text of the correct option
+- Identification: answer is 1-5 words, NO options field
 - Return ONLY valid JSON, no markdown, no extra text`;
 }
 
@@ -224,13 +245,12 @@ ${existing}
 
 Return ONLY a valid JSON array, nothing else:
 [
-  {"type":"MCQ","question":"?","options":["Option 1","Option 2","Option 3","Option 4"],"answer":"Option 1","explanation":"why"},
-  {"type":"Identification","question":"?","answer":"1-5 words","explanation":"why"}
+${getQuestionExample(settings.type)}
 ]
 
 STRICT RULES:
 - EXACTLY ${count} questions total
-- Type: ${settings.type === "Mixed" ? "mix MCQ and Identification evenly" : settings.type}
+- ⚠️ QUESTION TYPE: ${getTypeRule(settings.type)}
 - MCQ: exactly 4 options, no letter prefixes
 - MCQ ANSWER must be EXACT full text of correct option
 - Identification: no options field, answer is 1-5 words
@@ -257,7 +277,7 @@ export async function POST(req: NextRequest) {
 
     let studyKit: Record<string, unknown>;
     try {
-      const raw = await callLLM(studyKitPrompt, API_KEY, 4000, contentLength, difficulty);
+      const raw = await callLLM(studyKitPrompt, API_KEY, 8000, contentLength, difficulty);
       studyKit = repairAndParseJSON(raw);
       if (!studyKit.questions || !Array.isArray(studyKit.questions)) {
         throw new Error("Missing questions");
@@ -287,7 +307,7 @@ export async function POST(req: NextRequest) {
           .map((q: any, i: number) => `${i + 1}. ${q.question}`)
           .join("\n");
         const prompt = buildQuestionsOnlyPrompt(content, settings, batchCount, existingSummary);
-        return callLLM(prompt, API_KEY, batchCount * 200, contentLength, difficulty)
+        return callLLM(prompt, API_KEY, batchCount * 600, contentLength, difficulty)
           .then((raw) => parseJSONArray(raw))
           .catch((err) => {
             console.error("Batch failed:", err);
