@@ -1,4 +1,4 @@
-import { Upload, CheckCircle2, FileType, PresentationIcon, FileText, AlignLeft, Loader2 } from "lucide-react";
+import { Upload, CheckCircle2, FileType, PresentationIcon, FileText, AlignLeft, Loader2, Sparkles } from "lucide-react";
 import { InputSectionProps } from "@/app/lib/types";
 
 export default function InputSection({
@@ -12,7 +12,12 @@ export default function InputSection({
   isDragging,
   setIsDragging,
   handleFileUpload,
-}: InputSectionProps) {
+  customInstruction,
+  setCustomInstruction,
+}: InputSectionProps & {
+  customInstruction: string;
+  setCustomInstruction: (text: string) => void;
+}) {
   return (
     <section className="bg-[#232323] border border-[#2e2e2e] rounded-2xl overflow-hidden shadow-2xl hover:shadow-[0_8px_32px_rgba(62,207,142,0.08)] transition-shadow duration-300">
       <div className="flex border-b border-[#2e2e2e] bg-[#1c1c1c]">
@@ -86,6 +91,22 @@ export default function InputSection({
             onChange={(e) => setPastedText(e.target.value)}
           />
         ) : null}
+
+        {/* Custom Instruction Box */}
+        <div className="mt-4">
+          <div className="flex items-center gap-2 mb-2">
+            
+            <label className="text-[10px] font-bold text-[#555] uppercase tracking-widest">
+              Custom Instruction <span className="text-[#3e3e3e] normal-case">(optional)</span>
+            </label>
+          </div>
+          <textarea
+            className="w-full h-20 bg-[#1c1c1c] border border-[#2e2e2e] rounded-xl p-3 text-xs text-[#ededed] outline-none focus:border-[#3ecf8e] resize-none placeholder:text-[#444]"
+            placeholder={`e.g. "Focus on chapter 3 only" or "Summarize key definitions" or "Make questions about the cardiovascular system"`}
+            value={customInstruction}
+            onChange={(e) => setCustomInstruction(e.target.value)}
+          />
+        </div>
       </div>
     </section>
   );

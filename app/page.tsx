@@ -25,6 +25,7 @@ export default function StudyGenAI() {
   const [showResults, setShowResults] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState("");
+  const [customInstruction, setCustomInstruction] = useState("");
   const [settings, setSettings] = useState<Settings>({
     type: "Mixed",
     difficulty: "Medium",
@@ -40,25 +41,19 @@ export default function StudyGenAI() {
   const resultsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // Disable browser's automatic scroll restoration so page always starts at top
     if ("scrollRestoration" in history) {
       history.scrollRestoration = "manual";
     }
     window.scrollTo(0, 0);
 
-    // Show modals only once per session
     const hasSeenModals = sessionStorage.getItem("hasSeenLeyaniModals");
     if (!hasSeenModals) {
       setShowPrivacyModal(true);
       sessionStorage.setItem("hasSeenLeyaniModals", "true");
     }
 
-    // Restore file info, extracted text, and pasted text from session
     const savedFileName = sessionStorage.getItem("studygen_file_name");
-    if (savedFileName) {
-      // Create a lightweight placeholder File so the UI shows the name
-      setFile(new File([], savedFileName));
-    }
+    if (savedFileName) setFile(new File([], savedFileName));
     const savedExtracted = sessionStorage.getItem("studygen_extracted_text");
     if (savedExtracted) setExtractedText(savedExtracted);
     const savedPasted = sessionStorage.getItem("studygen_pasted_text");
@@ -66,15 +61,12 @@ export default function StudyGenAI() {
       setPastedText(savedPasted);
       setInputMode("text");
     }
-    // Load previously generated quiz data if available
     const savedQuizData = loadQuizData();
     if (savedQuizData) {
       setQuizData(savedQuizData);
       setShowResults(true);
     }
 
-    // Force scroll to top after all state restoration and re-renders
-    // Multiple calls at different timings to beat browser scroll restoration
     requestAnimationFrame(() => window.scrollTo(0, 0));
     setTimeout(() => window.scrollTo(0, 0), 0);
     setTimeout(() => window.scrollTo(0, 0), 50);
@@ -85,9 +77,7 @@ export default function StudyGenAI() {
     setFile(uploadedFile);
     setExtractedText("");
     setError("");
-    // Clear old quiz data so stale results never show
     clearAllQuizData();
-    // Clear previous file session data (will be replaced after extraction)
     sessionStorage.removeItem("studygen_extracted_text");
     sessionStorage.removeItem("studygen_pasted_text");
     sessionStorage.setItem("studygen_file_name", uploadedFile.name);
@@ -97,7 +87,6 @@ export default function StudyGenAI() {
 
     const ext = uploadedFile.name.split(".").pop()?.toLowerCase();
 
-    // For text files, read directly
     if (ext === "txt") {
       const text = await uploadedFile.text();
       setExtractedText(text);
@@ -108,12 +97,9 @@ export default function StudyGenAI() {
 
     setIsExtracting(true);
     try {
-      // Sanitize file name for storage path (remove special chars, spaces → underscores)
-      const safeName = uploadedFile.name
-        .replace(/[^a-zA-Z0-9._-]/g, "_");
+      const safeName = uploadedFile.name.replace(/[^a-zA-Z0-9._-]/g, "_");
       const storagePath = `${Date.now()}-${safeName}`;
 
-      // Always upload to Supabase Storage first (avoids server body size limits / 413 errors)
       const { error: uploadError } = await supabase.storage
         .from("LeyaAI")
         .upload(storagePath, uploadedFile, {
@@ -121,11 +107,8 @@ export default function StudyGenAI() {
           upsert: true,
         });
 
-      if (uploadError) {
-        throw new Error(`Upload failed: ${uploadError.message}`);
-      }
+      if (uploadError) throw new Error(`Upload failed: ${uploadError.message}`);
 
-      // Send only the storage path to the extract API (tiny JSON body)
       const res = await fetch("/api/extract", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -172,7 +155,8 @@ export default function StudyGenAI() {
       const response = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content, settings }),
+        // ✅ pass customInstruction sa API
+        body: JSON.stringify({ content, settings, customInstruction }),
       });
 
       let data;
@@ -230,10 +214,6 @@ export default function StudyGenAI() {
     }
   };
 
-  const canGenerate = !isExtracting && !isGenerating && (
-    inputMode === "text" ? pastedText.trim().length > 10 : extractedText.length > 10
-  );
-
   const handlePastedTextChange = (text: string) => {
     setPastedText(text);
     if (text.trim()) {
@@ -251,8 +231,6 @@ export default function StudyGenAI() {
         <HeroSection topic={quizData ? (file?.name?.replace(/\.[^.]+$/, "") || quizData.key_concepts?.[0] || undefined) : undefined} />
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-
-          {/* LEFT */}
           <div className="lg:col-span-5 space-y-6">
             <InputSection
               inputMode={inputMode}
@@ -265,6 +243,8 @@ export default function StudyGenAI() {
               isDragging={isDragging}
               setIsDragging={setIsDragging}
               handleFileUpload={handleFileUpload}
+              customInstruction={customInstruction}
+              setCustomInstruction={setCustomInstruction}
             />
 
             <SettingsSection
@@ -296,17 +276,17 @@ export default function StudyGenAI() {
         <FAQSection />
       </main>
 
-      <PrivacyModal 
-        show={showPrivacyModal} 
+      <PrivacyModal
+        show={showPrivacyModal}
         onNext={() => {
           setShowPrivacyModal(false);
           setTimeout(() => setShowFeaturesModal(true), 200);
-        }} 
+        }}
       />
 
-      <FeaturesModal 
-        show={showFeaturesModal} 
-        onClose={() => setShowFeaturesModal(false)} 
+      <FeaturesModal
+        show={showFeaturesModal}
+        onClose={() => setShowFeaturesModal(false)}
       />
     </div>
   );

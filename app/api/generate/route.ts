@@ -203,15 +203,30 @@ function getTypeRule(type: string): string {
   return "half MCQ, half Identification";
 }
 
-function buildStudyKitPrompt(content: string, settings: any, questionCount: number): string {
-  return `You are an expert study assistant. Analyze this material and generate a study kit as JSON.
+function buildStudyKitPrompt(content: string, settings: any, questionCount: number, customInstruction?: string): string {
+  const hasInstruction = !!customInstruction?.trim();
+  const instructionBlock = hasInstruction
+    ? `
+⚠️ CRITICAL USER INSTRUCTION — YOU MUST FOLLOW THIS STRICTLY:
+"${customInstruction!.trim()}"
 
+FOCUS ONLY on the topic mentioned above. 
+- Summary must explain ONLY that specific topic from the material
+- Glossary terms must be related to that topic only
+- Case studies must be about that topic only  
+- Questions must test knowledge of that topic only
+- Ignore all other topics in the material
+`
+    : "";
+
+  return `You are an expert study assistant. Analyze this material and generate a study kit as JSON.
+${instructionBlock}
 MATERIAL:
 ${content}
 
 Return this EXACT JSON structure:
 {
-  "summary": "400-600 word comprehensive explanation covering ALL topics. Plain paragraphs, no bullets.",
+  "summary": "150-250 word clear and concise explanation of the main topic. Plain paragraphs, no bullets.",
   "objectives": ["5-8 learning objectives"],
   "key_concepts": ["8-15 key terms"],
   "glossary": [{"term":"Name","definition":"Clear 1-3 sentence definition"}],
@@ -222,7 +237,7 @@ ${getQuestionExample(settings.type)}
 }
 
 STRICT RULES:
-- Summary: 400-600 words, cover all topics, plain paragraphs
+- Summary: 150-250 words MAXIMUM, concise and clear, plain paragraphs
 - Glossary: 8-15 terms
 - Case Studies: 3-4 scenarios
 - EXACTLY ${questionCount} questions, no more no less
@@ -234,8 +249,13 @@ STRICT RULES:
 - Return ONLY valid JSON, no markdown, no extra text`;
 }
 
-function buildQuestionsOnlyPrompt(content: string, settings: any, count: number, existing: string): string {
+function buildQuestionsOnlyPrompt(content: string, settings: any, count: number, existing: string, customInstruction?: string): string {
+  const instructionBlock = customInstruction?.trim()
+    ? `⚠️ FOCUS ONLY ON: "${customInstruction.trim()}" — questions must be about this topic only!\n`
+    : "";
+
   return `Generate EXACTLY ${count} quiz questions from this material. Do NOT repeat existing questions.
+${instructionBlock}
 
 MATERIAL:
 ${content}
@@ -261,7 +281,7 @@ STRICT RULES:
 
 export async function POST(req: NextRequest) {
   try {
-    const { content, settings } = await req.json();
+    const { content, settings, customInstruction } = await req.json();
     const requestedCount = Math.min(parseInt(settings.count || "10"), 30);
     const API_KEY = process.env.OPENROUTER_API_KEY || "";
     const contentLength = (content || "").length;
@@ -271,13 +291,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "API key not configured" }, { status: 500 });
     }
 
-    // ── STEP 1: Generate study kit + first 10 questions ──
-    const firstBatchCount = Math.min(requestedCount, 10);
-    const studyKitPrompt = buildStudyKitPrompt(content, settings, firstBatchCount);
+    // ⚡ FAST MODE: Easy + ≤15 questions → single call, less tokens
+    const isFastMode = difficulty === "Easy" && requestedCount <= 15;
+
+    // ── STEP 1: Generate study kit + questions ──
+    // Fast mode: generate ALL questions in one call (no batching needed)
+    // Normal mode: generate first 10, then batch the rest
+    const firstBatchCount = isFastMode ? requestedCount : Math.min(requestedCount, 10);
+    const firstMaxTokens = isFastMode ? 5000 : 8000;
+    const studyKitPrompt = buildStudyKitPrompt(content, settings, firstBatchCount, customInstruction);
 
     let studyKit: Record<string, unknown>;
     try {
-      const raw = await callLLM(studyKitPrompt, API_KEY, 8000, contentLength, difficulty);
+      const raw = await callLLM(studyKitPrompt, API_KEY, firstMaxTokens, contentLength, difficulty);
       studyKit = repairAndParseJSON(raw);
       if (!studyKit.questions || !Array.isArray(studyKit.questions)) {
         throw new Error("Missing questions");
@@ -292,8 +318,8 @@ export async function POST(req: NextRequest) {
 
     let allQuestions: any[] = studyKit.questions as any[];
 
-    // ── STEP 2: Fetch remaining questions in parallel batches of 10 ──
-    if (requestedCount > allQuestions.length) {
+    // ── STEP 2: Fetch remaining questions (skipped in fast mode) ──
+    if (!isFastMode && requestedCount > allQuestions.length) {
       const remaining = requestedCount - allQuestions.length;
       const batchSize = 10;
       const batches: number[] = [];
@@ -306,7 +332,7 @@ export async function POST(req: NextRequest) {
         const existingSummary = allQuestions
           .map((q: any, i: number) => `${i + 1}. ${q.question}`)
           .join("\n");
-        const prompt = buildQuestionsOnlyPrompt(content, settings, batchCount, existingSummary);
+        const prompt = buildQuestionsOnlyPrompt(content, settings, batchCount, existingSummary, customInstruction);
         return callLLM(prompt, API_KEY, batchCount * 600, contentLength, difficulty)
           .then((raw) => parseJSONArray(raw))
           .catch((err) => {
