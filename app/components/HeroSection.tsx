@@ -13,8 +13,8 @@ export default function HeroSection({ topic }: HeroSectionProps) {
       </h1>
       <p className="text-lg text-[#707070] max-w-2xl mx-auto leading-relaxed">
         {topic
-          ? `Your study kit for ${topic} is ready — review the summary, glossary, and take the quiz`
-          : "Upload your lecture notes or study materials and let AI generate comprehensive quizzes, glossaries, and case studies to supercharge your learning"
+          ? `Your study kit for ${topic} is ready — review the summary, cases and take the quiz`
+          : "Upload your lecture notes or study materials and let AI generate comprehensive quizzes, summaries, and case studies to supercharge your learning."
         }
       </p>
     </div>

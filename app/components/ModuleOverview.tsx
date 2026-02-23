@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { FileText, BookMarked, FlaskConical, CheckCircle2, Layers, Target, ListChecks, BookOpen, FlaskConical as CaseIcon } from "lucide-react";
+import { FileText, FlaskConical, CheckCircle2, Layers, Target, ListChecks, FlaskConical as CaseIcon } from "lucide-react";
 import { QuizData } from "@/lib/quiz-store";
 import { ChatMessage } from "@/app/lib/types";
 import ChatSection from "./ChatSection";
@@ -23,7 +23,7 @@ export default function ModuleOverview({
   handleChat,
   handleGoToQuiz,
 }: ModuleOverviewProps) {
-  const [activeTab, setActiveTab] = useState<"overview" | "glossary" | "cases" | "takeaways">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "cases">("overview");
 
   return (
     <div className="bg-[#232323] border border-[#2e2e2e] rounded-2xl shadow-2xl overflow-hidden hover:shadow-[0_12px_48px_rgba(62,207,142,0.12)] transition-shadow duration-300">
@@ -35,13 +35,11 @@ export default function ModuleOverview({
           <h2 className="text-2xl font-bold tracking-tight">Module Overview</h2>
         </div>
 
-        {/* Tabs */}
+        {/* Tabs — Overview + Cases only */}
         <div className="flex gap-1 border-b border-[#2e2e2e] overflow-x-auto scrollbar-hide">
           {([
             { id: "overview", label: "Overview", icon: <FileText size={12} /> },
-            { id: "glossary", label: "Glossary", icon: <BookMarked size={12} /> },
-            { id: "cases", label: "Cases", icon: <CaseIcon size={12} /> },
-            { id: "takeaways", label: "Takeaways", icon: <CheckCircle2 size={12} /> },
+            { id: "cases",    label: "Cases",    icon: <CaseIcon size={12} /> },
           ] as const).map(tab => (
             <button key={tab.id} onClick={() => setActiveTab(tab.id)}
               className={`flex items-center gap-1 px-2 sm:px-3 py-2 text-[11px] sm:text-xs font-bold transition-all border-b-2 -mb-px whitespace-nowrap
@@ -103,78 +101,24 @@ export default function ModuleOverview({
           </div>
         )}
 
-        {/* GLOSSARY TAB */}
-        {activeTab === "glossary" && (
-          <div>
-            <p className="text-xs text-[#555] mb-4">Key terms and definitions from the material.</p>
-            {(!quizData?.glossary || quizData.glossary.length === 0) ? (
-              <div className="text-center py-10 text-[#444]">
-                <BookMarked size={32} className="mx-auto mb-3 opacity-20" />
-                <p className="text-sm">No glossary generated yet.</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {quizData.glossary.map((item, i) => (
-                  <div key={i} className="p-4 bg-[#1c1c1c] border border-[#2e2e2e] rounded-xl hover:border-[#3ecf8e]/30 hover:shadow-lg hover:shadow-[#3ecf8e]/5 transition-all">
-                    <p className="text-sm font-black text-[#3ecf8e] mb-1">{item.term}</p>
-                    <p className="text-xs text-[#a0a0a0] leading-relaxed">{item.definition}</p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* CASE STUDIES TAB */}
+        {/* CASES TAB — simplified */}
         {activeTab === "cases" && (
           <div>
-            <p className="text-xs text-[#555] mb-4">Real-world scenarios to deepen your understanding.</p>
             {(!quizData?.case_studies || quizData.case_studies.length === 0) ? (
               <div className="text-center py-10 text-[#444]">
                 <CaseIcon size={32} className="mx-auto mb-3 opacity-20" />
                 <p className="text-sm">No case studies generated yet.</p>
               </div>
             ) : (
-              <div className="space-y-4">
+              <div className="space-y-3">
                 {quizData.case_studies.map((cs, i) => (
-                  <div key={i} className="p-5 bg-[#1c1c1c] border border-[#2e2e2e] rounded-xl hover:border-[#3ecf8e]/30 hover:shadow-lg hover:shadow-[#3ecf8e]/5 transition-all">
-                    <div className="flex items-start gap-3 mb-3">
-                      <div className="p-1.5 bg-[#3ecf8e]/10 rounded-lg shrink-0">
-                        <CaseIcon size={14} className="text-[#3ecf8e]" />
-                      </div>
-                      <p className="text-sm font-black text-[#ededed]">{cs.title}</p>
-                    </div>
-                    <p className="text-xs text-[#a0a0a0] leading-relaxed mb-3">{cs.scenario}</p>
-                    <div className="p-3 bg-[#3ecf8e]/5 border border-[#3ecf8e]/20 rounded-lg">
-                      <p className="text-[10px] font-black text-[#3ecf8e] uppercase tracking-widest mb-1">Key Takeaway</p>
-                      <p className="text-xs text-[#b0b0b0] leading-relaxed">{cs.lesson}</p>
-                    </div>
+                  <div key={i} className="p-4 bg-[#1c1c1c] border border-[#2e2e2e] rounded-xl hover:border-[#3ecf8e]/30 transition-all">
+                    <p className="text-sm font-black text-[#3ecf8e] mb-2">{cs.title}</p>
+                    <p className="text-xs text-[#a0a0a0] leading-relaxed">{cs.scenario}</p>
                   </div>
                 ))}
               </div>
             )}
-          </div>
-        )}
-
-        {/* KEY TAKEAWAYS TAB */}
-        {activeTab === "takeaways" && (
-          <div>
-            <p className="text-xs text-[#555] mb-4">Essential points to remember - quick summary.</p>
-            <div className="space-y-2">
-              {quizData?.key_concepts && quizData.key_concepts.length > 0 ? (
-                quizData.key_concepts.map((concept, i) => (
-                  <div key={i} className="flex items-start gap-3 p-3 bg-[#1c1c1c] border border-[#2e2e2e] rounded-lg hover:border-[#3ecf8e]/30 hover:bg-[#1c1c1c]/80 transition-all">
-                    <CheckCircle2 size={14} className="text-[#3ecf8e] shrink-0 mt-0.5" />
-                    <p className="text-xs text-[#b0b0b0]">{concept}</p>
-                  </div>
-                ))
-              ) : (
-                <div className="text-center py-10 text-[#444]">
-                  <ListChecks size={32} className="mx-auto mb-3 opacity-20" />
-                  <p className="text-sm">No takeaways generated yet.</p>
-                </div>
-              )}
-            </div>
           </div>
         )}
       </div>

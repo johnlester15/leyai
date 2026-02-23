@@ -3,23 +3,9 @@ import { NextRequest, NextResponse } from "next/server";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const FREE_MODELS = [
-  "qwen/qwen3-235b-a22b-thinking:free",            // 🥇 best reasoning
-  "openai/gpt-oss-120b:free",                      // 🥈 OpenAI free 120B
-  "google/gemini-2.0-flash-exp:free",              // 🥉 1M context
-  "meta-llama/llama-3.3-70b-instruct:free",        // reliable
-  "mistralai/mistral-small-3.1-24b-instruct:free", // great JSON
-  "stepfun/step-3.5-flash:free",                   // ultra fast
-  "z-ai/glm-4.5-air:free",                         // fast
-  "arcee-ai/trinity-large-preview:free",           // your OG
-  "nvidia/nemotron-3-nano-30b-a3b:free",           // fallback
-];
+const MODEL_PRIMARY = "google/gemini-2.5-flash-lite";
+const MODEL_FALLBACK = "deepseek/deepseek-chat-v3-0324";
 
-// 💎 Premium — replaces GPT-3.5-turbo (faster + smarter)
-const PREMIUM_MODELS = [
-  "google/gemini-2.5-flash-lite",  // 🥇 Ultra fast + cheap
-  "anthropic/claude-sonnet-4.6",   // 🥈 Smart + reliable
-];
 
 async function callModel(
   model: string,
@@ -45,9 +31,9 @@ async function callModel(
         messages: [
           {
             role: "system",
-            content: `You are LEYANI AI, an expert study assistant created by John Lester D. Defensor. LEYANI was named after his girlfriend Leannie, who is his inspiration for building this app. If anyone asks who made you, always say: "I was created by John Lester D. Defensor." If anyone asks what LEYANI means or stands for, explain it was named after his girlfriend Leannie as a tribute to her.`
+            content: `You are LEYANI AI, an expert study assistant created by John Lester D. Defensor. LEYANI was named after his girlfriend Leannie, who is his inspiration for building this app. If anyone asks who made you, always say: "I was created by John Lester D. Defensor." If anyone asks what LEYANI means or stands for, explain it was named after his girlfriend Leannie as a tribute to her.`,
           },
-          { role: "user", content: prompt }
+          { role: "user", content: prompt },
         ],
         max_tokens: maxTokens,
         temperature: 0.3,
@@ -68,38 +54,39 @@ async function callModel(
   }
 }
 
-// 🟢 GAAN → free models race (15s), kung fail → premium fallback
-// 🔴 BUG-AT → free + premium race together, fastest wins
+// 🔄 Random alternate — 50/50 kung asa mag-start, even ang spending
 async function callLLM(
   prompt: string,
-  apiKey: string,
-  maxTokens: number,
-  contentLength: number,
-  difficulty: string
+  key1: string,
+  key2: string,
+  maxTokens: number
 ): Promise<string> {
-  const isSimple = contentLength < 3000 && difficulty !== "Hard";
+  const [firstKey, secondKey] = Math.random() < 0.5
+    ? [key1, key2]
+    : [key2, key1];
 
-  if (isSimple) {
-    try {
-      return await Promise.any(
-        FREE_MODELS.map((model) => callModel(model, prompt, apiKey, maxTokens, 15000))
-      );
-    } catch {
-      // Free failed → premium fallback
-      return await Promise.any(
-        PREMIUM_MODELS.map((model) => callModel(model, prompt, apiKey, maxTokens, 30000))
-      );
-    }
-  } else {
-    // Heavy task — race everyone, fastest wins!
-    try {
-      return await Promise.any([
-        ...FREE_MODELS.map((model) => callModel(model, prompt, apiKey, maxTokens, 25000)),
-        ...PREMIUM_MODELS.map((model) => callModel(model, prompt, apiKey, maxTokens, 55000)),
-      ]);
-    } catch {
-      throw new Error("All models failed. Please try again.");
-    }
+  try {
+    return await callModel(MODEL_PRIMARY, prompt, firstKey, maxTokens, 30000);
+  } catch {
+    console.log("Gemini+FirstKey failed, trying SecondKey...");
+  }
+
+  try {
+    return await callModel(MODEL_PRIMARY, prompt, secondKey, maxTokens, 30000);
+  } catch {
+    console.log("Gemini+SecondKey failed, trying DeepSeek+FirstKey...");
+  }
+
+  try {
+    return await callModel(MODEL_FALLBACK, prompt, firstKey, maxTokens, 55000);
+  } catch {
+    console.log("DeepSeek+FirstKey failed, trying DeepSeek+SecondKey...");
+  }
+
+  try {
+    return await callModel(MODEL_FALLBACK, prompt, secondKey, maxTokens, 55000);
+  } catch {
+    throw new Error("All models and keys failed. Please try again.");
   }
 }
 
@@ -212,7 +199,6 @@ function buildStudyKitPrompt(content: string, settings: any, questionCount: numb
 
 FOCUS ONLY on the topic mentioned above. 
 - Summary must explain ONLY that specific topic from the material
-- Glossary terms must be related to that topic only
 - Case studies must be about that topic only  
 - Questions must test knowledge of that topic only
 - Ignore all other topics in the material
@@ -226,20 +212,22 @@ ${content}
 
 Return this EXACT JSON structure:
 {
-  "summary": "150-250 word clear and concise explanation of the main topic. Plain paragraphs, no bullets.",
-  "objectives": ["5-8 learning objectives"],
-  "key_concepts": ["8-15 key terms"],
-  "glossary": [{"term":"Name","definition":"Clear 1-3 sentence definition"}],
-  "case_studies": [{"title":"Title","scenario":"4-6 sentence real scenario","lesson":"Connection to concepts"}],
+  "summary": "Start with 1-2 sentence topic intro. Then use bullet points with • symbol for key details and subtopics. 150-250 words total. Must be readable and well-structured.",
+  "key_concepts": ["8-15 short key terms from the material"],
+  "case_studies": [{"title":"Title","scenario":"2-3 sentence simple real-world scenario only"}],
   "questions": [
 ${getQuestionExample(settings.type)}
   ]
 }
 
 STRICT RULES:
-- Summary: 150-250 words MAXIMUM, concise and clear, plain paragraphs
-- Glossary: 8-15 terms
-- Case Studies: 3-4 scenarios
+- Summary: 1-2 sentence intro THEN bullet points using • symbol for details. 150-250 words MAX.
+- key_concepts: 8-15 short key terms only, no definitions
+- Case Studies: 3-4 scenarios, title + scenario ONLY — NO lesson field
+- NO glossary field
+- NO objectives field
+- NO takeaways field
+- NO key_takeaways field
 - EXACTLY ${questionCount} questions, no more no less
 - ⚠️ QUESTION TYPE: ${getTypeRule(settings.type)}
 - MCQ: exactly 4 options. Difficulty: ${settings.difficulty}
@@ -283,27 +271,24 @@ export async function POST(req: NextRequest) {
   try {
     const { content, settings, customInstruction } = await req.json();
     const requestedCount = Math.min(parseInt(settings.count || "10"), 30);
-    const API_KEY = process.env.OPENROUTER_API_KEY || "";
+
+    const KEY1 = process.env.OPENROUTER_API_KEY || "";
+    const KEY2 = process.env.OPENAI_API_KEY || "";
     const contentLength = (content || "").length;
     const difficulty = settings.difficulty || "Medium";
 
-    if (!API_KEY) {
+    if (!KEY1) {
       return NextResponse.json({ error: "API key not configured" }, { status: 500 });
     }
 
-    // ⚡ FAST MODE: Easy + ≤15 questions → single call, less tokens
     const isFastMode = difficulty === "Easy" && requestedCount <= 15;
-
-    // ── STEP 1: Generate study kit + questions ──
-    // Fast mode: generate ALL questions in one call (no batching needed)
-    // Normal mode: generate first 10, then batch the rest
     const firstBatchCount = isFastMode ? requestedCount : Math.min(requestedCount, 10);
     const firstMaxTokens = isFastMode ? 5000 : 8000;
     const studyKitPrompt = buildStudyKitPrompt(content, settings, firstBatchCount, customInstruction);
 
     let studyKit: Record<string, unknown>;
     try {
-      const raw = await callLLM(studyKitPrompt, API_KEY, firstMaxTokens, contentLength, difficulty);
+      const raw = await callLLM(studyKitPrompt, KEY1, KEY2, firstMaxTokens);
       studyKit = repairAndParseJSON(raw);
       if (!studyKit.questions || !Array.isArray(studyKit.questions)) {
         throw new Error("Missing questions");
@@ -318,7 +303,6 @@ export async function POST(req: NextRequest) {
 
     let allQuestions: any[] = studyKit.questions as any[];
 
-    // ── STEP 2: Fetch remaining questions (skipped in fast mode) ──
     if (!isFastMode && requestedCount > allQuestions.length) {
       const remaining = requestedCount - allQuestions.length;
       const batchSize = 10;
@@ -333,7 +317,7 @@ export async function POST(req: NextRequest) {
           .map((q: any, i: number) => `${i + 1}. ${q.question}`)
           .join("\n");
         const prompt = buildQuestionsOnlyPrompt(content, settings, batchCount, existingSummary, customInstruction);
-        return callLLM(prompt, API_KEY, batchCount * 600, contentLength, difficulty)
+        return callLLM(prompt, KEY1, KEY2, batchCount * 600)
           .then((raw) => parseJSONArray(raw))
           .catch((err) => {
             console.error("Batch failed:", err);
@@ -349,9 +333,21 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ── STEP 3: Normalize + enforce exact count ──
     allQuestions = normalizeQuestions(allQuestions);
     studyKit.questions = allQuestions.slice(0, requestedCount);
+
+    // Force remove unwanted fields
+    delete (studyKit as any).glossary;
+    delete (studyKit as any).takeaways;
+    delete (studyKit as any).key_takeaways;
+    delete (studyKit as any).objectives;
+
+    // Keep only title + scenario in case_studies
+    if (Array.isArray(studyKit.case_studies)) {
+      studyKit.case_studies = (studyKit.case_studies as any[]).map(
+        ({ title, scenario }) => ({ title, scenario })
+      );
+    }
 
     return NextResponse.json(studyKit);
   } catch (error: any) {
