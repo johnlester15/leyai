@@ -6,7 +6,6 @@ export const maxDuration = 60;
 const MODEL_PRIMARY = "google/gemini-2.5-flash-lite";
 const MODEL_FALLBACK = "deepseek/deepseek-chat-v3-0324";
 
-
 async function callModel(
   model: string,
   prompt: string,
@@ -303,6 +302,7 @@ export async function POST(req: NextRequest) {
 
     let allQuestions: any[] = studyKit.questions as any[];
 
+    // ── STEP 2: Fetch remaining questions in batches ──
     if (!isFastMode && requestedCount > allQuestions.length) {
       const remaining = requestedCount - allQuestions.length;
       const batchSize = 10;
@@ -333,7 +333,33 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ── STEP 3: Normalize ──
     allQuestions = normalizeQuestions(allQuestions);
+
+    // ── STEP 4: Retry kung kulang pa ang questions ──
+    if (allQuestions.length < requestedCount) {
+      const stillNeeded = requestedCount - allQuestions.length;
+      console.log(`Still needed ${stillNeeded} questions, retrying...`);
+      const existingSummary = allQuestions
+        .map((q: any, i: number) => `${i + 1}. ${q.question}`)
+        .join("\n");
+      const retryPrompt = buildQuestionsOnlyPrompt(
+        content,
+        settings,
+        stillNeeded,
+        existingSummary,
+        customInstruction
+      );
+      try {
+        const raw = await callLLM(retryPrompt, KEY1, KEY2, stillNeeded * 600);
+        const extra = parseJSONArray(raw);
+        allQuestions = allQuestions.concat(normalizeQuestions(extra));
+      } catch {
+        console.log("Retry failed, proceeding with available questions.");
+      }
+    }
+
+    // ── STEP 5: Enforce exact count ──
     studyKit.questions = allQuestions.slice(0, requestedCount);
 
     // Force remove unwanted fields
